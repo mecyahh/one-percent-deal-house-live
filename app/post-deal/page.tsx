@@ -1,105 +1,80 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-const relationships = ["spouse","child","parent","friend","sibling","other"] as const;
-
 export default function PostDealPage() {
-  const [sessionReady, setSessionReady] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
 
-  // form
-  const [fullName, setFullName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [clientDob, setClientDob] = useState("");
-  const [beneficiaryName, setBeneficiaryName] = useState("");
-  const [beneficiaryRelationship, setBeneficiaryRelationship] = useState<(typeof relationships)[number]>("spouse");
-  const [beneficiaryDob, setBeneficiaryDob] = useState("");
-  const [coverage, setCoverage] = useState("");
-  const [premium, setPremium] = useState("");
-  const [company, setCompany] = useState("");
-  const [notes, setNotes] = useState("");
-  const [msg, setMsg] = useState("");
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setLoading(true);
 
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase.auth.getSession();
-      if (!data.session) {
-        window.location.href = "/login";
-        return;
-      }
-      setSessionReady(true);
-    })();
-  }, []);
+    const formData = new FormData(e.currentTarget);
 
-  const submit = async () => {
-    setMsg("");
+    const { data: userData } = await supabase.auth.getUser();
+    const user = userData.user;
 
-    const { data: sess } = await supabase.auth.getSession();
-    const user = sess.session?.user;
-    if (!user) return (window.location.href = "/login");
+    if (!user) {
+      alert("You must be logged in");
+      setLoading(false);
+      return;
+    }
 
     const { error } = await supabase.from("deals").insert({
-      agent_id: user.id,
-      full_name: fullName,
-      phone,
-      client_dob: clientDob || null,
-      beneficiary_name: beneficiaryName || null,
-      beneficiary_relationship: beneficiaryRelationship || null,
-      beneficiary_dob: beneficiaryDob || null,
-      coverage: coverage ? Number(coverage) : null,
-      premium: premium ? Number(premium) : null,
-      company: company || null,
-      notes: notes || null,
-      status: "pending"
+      user_id: user.id,
+      full_name: formData.get("full_name"),
+      phone: formData.get("phone"),
+      client_dob: formData.get("client_dob"),
+      beneficiary_name: formData.get("beneficiary_name"),
+      beneficiary_relationship: formData.get("beneficiary_relationship"),
+      beneficiary_dob: formData.get("beneficiary_dob"),
+      coverage: formData.get("coverage"),
+      premium: formData.get("premium"),
+      company: formData.get("company"),
+      notes: formData.get("notes"),
     });
 
-    if (error) return setMsg(error.message);
+    setLoading(false);
 
-    setMsg("✅ Deal submitted");
-    setFullName(""); setPhone(""); setClientDob("");
-    setBeneficiaryName(""); setBeneficiaryRelationship("spouse"); setBeneficiaryDob("");
-    setCoverage(""); setPremium(""); setCompany(""); setNotes("");
-  };
-
-  if (!sessionReady) return null;
+    if (error) {
+      alert(error.message);
+    } else {
+      setSuccess(true);
+      e.currentTarget.reset();
+    }
+  }
 
   return (
-    <div style={{ maxWidth: 720, margin: "40px auto", fontFamily: "system-ui" }}>
+    <div style={{ maxWidth: 600, margin: "40px auto" }}>
       <h1>Post a Deal</h1>
 
-      <div style={{ display: "grid", gap: 10 }}>
-        <input placeholder="Full name" value={fullName} onChange={(e)=>setFullName(e.target.value)} style={{ padding: 12 }} />
-        <input placeholder="Phone" value={phone} onChange={(e)=>setPhone(e.target.value)} style={{ padding: 12 }} />
+      {success && <p style={{ color: "green" }}>Deal submitted successfully.</p>}
 
-        <label>Client DOB</label>
-        <input type="date" value={clientDob} onChange={(e)=>setClientDob(e.target.value)} style={{ padding: 12 }} />
+      <form onSubmit={handleSubmit}>
+        <input name="full_name" placeholder="Full name" required />
+        <input name="phone" placeholder="Phone" required />
+        <input name="client_dob" type="date" required />
 
-        <hr />
-
-        <input placeholder="Beneficiary name" value={beneficiaryName} onChange={(e)=>setBeneficiaryName(e.target.value)} style={{ padding: 12 }} />
-
-        <label>Beneficiary relationship</label>
-        <select value={beneficiaryRelationship} onChange={(e)=>setBeneficiaryRelationship(e.target.value as any)} style={{ padding: 12 }}>
-          {relationships.map(r => <option key={r} value={r}>{r}</option>)}
+        <input name="beneficiary_name" placeholder="Beneficiary name" />
+        <select name="beneficiary_relationship">
+          <option value="spouse">Spouse</option>
+          <option value="child">Child</option>
+          <option value="parent">Parent</option>
+          <option value="other">Other</option>
         </select>
+        <input name="beneficiary_dob" type="date" />
 
-        <label>Beneficiary DOB</label>
-        <input type="date" value={beneficiaryDob} onChange={(e)=>setBeneficiaryDob(e.target.value)} style={{ padding: 12 }} />
+        <input name="coverage" placeholder="Coverage" />
+        <input name="premium" placeholder="Premium" />
+        <input name="company" placeholder="Company" />
+        <textarea name="notes" placeholder="Notes" />
 
-        <hr />
-
-        <input placeholder="Coverage" value={coverage} onChange={(e)=>setCoverage(e.target.value)} style={{ padding: 12 }} />
-        <input placeholder="Premium" value={premium} onChange={(e)=>setPremium(e.target.value)} style={{ padding: 12 }} />
-        <input placeholder="Company" value={company} onChange={(e)=>setCompany(e.target.value)} style={{ padding: 12 }} />
-        <textarea placeholder="Notes" value={notes} onChange={(e)=>setNotes(e.target.value)} style={{ padding: 12, minHeight: 120 }} />
-
-        <button onClick={submit} style={{ padding: 14, fontWeight: 700 }}>
-          Submit Deal
+        <button type="submit" disabled={loading}>
+          {loading ? "Submitting..." : "Submit Deal"}
         </button>
-
-        {msg ? <p>{msg}</p> : null}
-      </div>
+      </form>
     </div>
   );
 }
