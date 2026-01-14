@@ -1,82 +1,51 @@
-'use client';
-
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+'use client'
 
 export default function DashboardPage() {
-  const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  const [email, setEmail] = useState<string | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase.auth.getSession();
-      const session = data.session;
-
-      if (!session) {
-        router.replace("/login");
-        return;
-      }
-
-      setEmail(session.user.email ?? null);
-      setLoading(false);
-    })();
-  }, [router]);
-
-  if (loading) return <div style={{ padding: 24 }}>Loading dashboard...</div>;
-
   return (
-    <div style={{ padding: 24, fontFamily: "system-ui" }}>
-      <h1 style={{ marginBottom: 6 }}>Flow Dashboard</h1>
-      <div style={{ opacity: 0.7, marginBottom: 24 }}>
-        Logged in as: {email ?? "User"}
+    <main className="min-h-screen bg-[#0b0f1a] text-white p-8">
+      {/* Header */}
+      <div className="flex justify-between items-center mb-10">
+        <div>
+          <h1 className="text-3xl font-semibold">Flow Dashboard</h1>
+          <p className="text-sm text-gray-400">Everything is flowing.</p>
+        </div>
+        <div className="flex gap-4">
+          <button className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20">
+            Dark
+          </button>
+          <button className="px-4 py-2 rounded-lg bg-red-500/80 hover:bg-red-500">
+            Log Out
+          </button>
+        </div>
       </div>
 
-      <div style={{ display: "flex", gap: 12, marginBottom: 18, flexWrap: "wrap" }}>
-        <Card title="Today" value="0 deals" />
-        <Card title="This Week" value="0 deals" />
-        <Card title="This Month" value="0 deals" />
-      </div>
+      {/* Stat Cards */}
+      <section className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+        <Stat title="Today" value="0 Deals" />
+        <Stat title="This Week" value="0 Deals" />
+        <Stat title="This Month" value="0 Deals" />
+      </section>
 
-      <button
-        onClick={() => router.push("/post-deal")}
-        style={{
-          padding: "10px 14px",
-          borderRadius: 8,
-          border: "1px solid #ddd",
-          cursor: "pointer",
-          fontWeight: 600
-        }}
-      >
-        Post a Deal
-      </button>
+      {/* Main Grid */}
+      <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Activity */}
+        <div className="lg:col-span-2 glass p-6">
+          <h2 className="text-lg mb-4">Weekly Flow</h2>
+          <div className="h-48 bg-white/5 rounded-lg flex items-center justify-center text-gray-400">
+            Chart Placeholder
+          </div>
+        </div>
 
-      <button
-        onClick={async () => {
-          await supabase.auth.signOut();
-          router.replace("/login");
-        }}
-        style={{
-          padding: "10px 14px",
-          borderRadius: 8,
-          border: "1px solid #ddd",
-          cursor: "pointer",
-          fontWeight: 600,
-          marginLeft: 10
-        }}
-      >
-        Log out
-      </button>
-    </div>
-  );
-}
+        {/* Leaderboard */}
+        <div className="glass p-6">
+          <h2 className="text-lg mb-4">Leaderboard</h2>
+          <LeaderboardItem name="Lisa Meyers" amount="$13,200" />
+          <LeaderboardItem name="Steven Jones" amount="$11,700" />
+          <LeaderboardItem name="Brian Davis" amount="$9,700" />
+        </div>
+      </section>
 
-function Card({ title, value }: { title: string; value: string }) {
-  return (
-    <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 16, minWidth: 160 }}>
-      <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>{title}</div>
-      <div style={{ fontSize: 20, fontWeight: 700 }}>{value}</div>
-    </div>
-  );
-}
+      {/* Actions */}
+      <div className="mt-10 flex gap-4">
+        <a
+          href="/post
