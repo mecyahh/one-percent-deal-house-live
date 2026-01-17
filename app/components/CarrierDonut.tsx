@@ -1,11 +1,7 @@
 'use client'
 
 import React from 'react'
-import {
-  Chart as ChartJS,
-  ArcElement,
-  Tooltip,
-} from 'chart.js'
+import { Chart as ChartJS, ArcElement, Tooltip } from 'chart.js'
 import { Doughnut } from 'react-chartjs-2'
 
 ChartJS.register(ArcElement, Tooltip)
@@ -17,10 +13,10 @@ export default function CarrierDonut() {
       {
         data: [38, 26, 22, 14], // mock data for now
         backgroundColor: [
-          'rgba(59,130,246,0.85)',  // blue
-          'rgba(34,197,94,0.85)',   // green
-          'rgba(245,158,11,0.85)',  // amber
-          'rgba(255,255,255,0.25)'  // neutral
+          'rgba(59,130,246,0.85)',
+          'rgba(34,197,94,0.85)',
+          'rgba(245,158,11,0.85)',
+          'rgba(255,255,255,0.25)',
         ],
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.10)',
