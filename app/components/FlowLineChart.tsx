@@ -14,21 +14,22 @@ import { Line } from 'react-chartjs-2'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler)
 
-export default function FlowLineChart() {
-  // Mock for now (we’ll wire Supabase later)
-  const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-  const values = [12, 18, 14, 22, 19, 27, 24]
-
+export default function FlowLineChart({
+  labels,
+  values,
+}: {
+  labels: string[]
+  values: number[]
+}) {
   const trend = useMemo(() => {
     const last = values[values.length - 1] ?? 0
     const prev = values[values.length - 2] ?? last
     const delta = last - prev
     const dir = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat'
     return { last, prev, delta, dir }
-  }, [])
+  }, [values])
 
   const colors = useMemo(() => {
-    // Stock style: up=green, down=red, flat=blue
     if (trend.dir === 'up') return { line: '#22C55E', fill: 'rgba(34,197,94,0.18)' }
     if (trend.dir === 'down') return { line: '#EF4444', fill: 'rgba(239,68,68,0.18)' }
     return { line: '#3B82F6', fill: 'rgba(59,130,246,0.18)' }
@@ -59,7 +60,7 @@ export default function FlowLineChart() {
         },
       ],
     }
-  }, [colors.fill, colors.line])
+  }, [labels, values, colors.fill, colors.line])
 
   const options: any = useMemo(() => {
     return {
@@ -91,7 +92,8 @@ export default function FlowLineChart() {
         },
         y: {
           grid: { color: 'rgba(255,255,255,0.06)' },
-          ticks: { color: 'rgba(255,255,255,0.55)' },
+          ticks: { color: 'rgba(255,255,255,0.55)', precision: 0 },
+          beginAtZero: true,
         },
       },
     }
