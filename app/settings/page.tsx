@@ -126,7 +126,6 @@ export default function SettingsPage() {
   }, [agents, agentSearch])
 
   const uplineOptions = useMemo(() => {
-    // show live agents list for upline picker
     return agents
       .slice()
       .sort((a, b) => {
@@ -236,7 +235,7 @@ export default function SettingsPage() {
           <div className="glass px-5 py-4 rounded-2xl border border-white/10 shadow-2xl">
             <div className="text-sm font-semibold">{toast}</div>
             <div className="mt-3 flex gap-2">
-              <button className={btnSoft} onClick={() => setToast(null)}>
+              <button className="rounded-xl bg-white/10 hover:bg-white/15 transition px-3 py-2 text-xs" onClick={() => setToast(null)}>
                 OK
               </button>
             </div>
@@ -267,33 +266,21 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* PROFILE */}
         {tab === 'profile' && (
           <div className="glass rounded-2xl border border-white/10 p-6">
             <div className="text-sm font-semibold mb-4">My Profile</div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field label="First Name">
-                <input className={inputCls} value={pFirst} onChange={(e) => setPFirst(e.target.value)} />
-              </Field>
-              <Field label="Last Name">
-                <input className={inputCls} value={pLast} onChange={(e) => setPLast(e.target.value)} />
-              </Field>
-              <Field label="Email">
-                <input className={inputCls} value={pEmail} onChange={(e) => setPEmail(e.target.value)} />
-              </Field>
-              <Field label="Profile Picture URL">
-                <input className={inputCls} value={pAvatar} onChange={(e) => setPAvatar(e.target.value)} placeholder="https://..." />
-              </Field>
+              <Field label="First Name"><input className={inputCls} value={pFirst} onChange={(e) => setPFirst(e.target.value)} /></Field>
+              <Field label="Last Name"><input className={inputCls} value={pLast} onChange={(e) => setPLast(e.target.value)} /></Field>
+              <Field label="Email"><input className={inputCls} value={pEmail} onChange={(e) => setPEmail(e.target.value)} /></Field>
+              <Field label="Profile Picture URL"><input className={inputCls} value={pAvatar} onChange={(e) => setPAvatar(e.target.value)} placeholder="https://..." /></Field>
             </div>
 
-            <button onClick={saveProfile} className={saveWide}>
-              Save Profile
-            </button>
+            <button onClick={saveProfile} className={saveWide}>Save Profile</button>
           </div>
         )}
 
-        {/* AGENTS */}
         {tab === 'agents' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="glass rounded-2xl border border-white/10 p-6">
@@ -302,27 +289,19 @@ export default function SettingsPage() {
                   <div className="text-sm font-semibold">Agents</div>
                   <div className="text-xs text-white/55 mt-1">Invite + manage uplines & comp.</div>
                 </div>
-
-                <button onClick={() => setInviteOpen(true)} className={saveBtn}>
+                <button onClick={() => setInviteOpen(true)} className="rounded-2xl bg-green-600 hover:bg-green-500 transition px-5 py-3 text-sm font-semibold">
                   Add Agent
                 </button>
               </div>
 
               <div className="glass rounded-2xl border border-white/10 px-3 py-2 flex items-center gap-2 mb-4">
-                <input
-                  className="bg-transparent outline-none text-sm w-full placeholder:text-white/40"
-                  placeholder="Search agents…"
-                  value={agentSearch}
-                  onChange={(e) => setAgentSearch(e.target.value)}
-                />
+                <input className="bg-transparent outline-none text-sm w-full placeholder:text-white/40" placeholder="Search agents…" value={agentSearch} onChange={(e) => setAgentSearch(e.target.value)} />
               </div>
 
               <div className="rounded-2xl border border-white/10 overflow-hidden">
                 <div className="px-4 py-3 bg-white/5 flex items-center justify-between">
                   <div className="text-xs font-semibold">Directory</div>
-                  <button onClick={loadAgents} className={btnSoft}>
-                    Refresh
-                  </button>
+                  <button onClick={loadAgents} className="rounded-xl bg-white/10 hover:bg-white/15 transition px-3 py-2 text-xs">Refresh</button>
                 </div>
 
                 {loadingAgents && <div className="px-4 py-6 text-sm text-white/60">Loading…</div>}
@@ -339,16 +318,12 @@ export default function SettingsPage() {
                           </div>
                           <div className="text-xs text-white/55 mt-1">{a.email || '—'}</div>
                         </div>
-
                         <div className="text-xs text-white/65">
                           <span className="px-2 py-1 rounded-xl border border-white/10 bg-white/5">Comp {a.comp}%</span>
                         </div>
                       </div>
                     ))}
-
-                    {filteredAgents.length === 0 && (
-                      <div className="px-4 py-6 text-sm text-white/60">No agents.</div>
-                    )}
+                    {filteredAgents.length === 0 && <div className="px-4 py-6 text-sm text-white/60">No agents.</div>}
                   </div>
                 )}
               </div>
@@ -356,14 +331,11 @@ export default function SettingsPage() {
 
             <div className="glass rounded-2xl border border-white/10 p-6">
               <div className="text-sm font-semibold mb-2">Admin Notes</div>
-              <div className="text-xs text-white/55">
-                Add Agent sends an invite link to the agent’s email. They create their password and log into Flow.
-              </div>
+              <div className="text-xs text-white/55">Add Agent sends an invite link to the agent’s email. They create their password and log into Flow.</div>
             </div>
           </div>
         )}
 
-        {/* POSITIONS */}
         {tab === 'positions' && (
           <div className="glass rounded-2xl border border-white/10 p-6">
             <div className="text-sm font-semibold">Update Position</div>
@@ -374,9 +346,7 @@ export default function SettingsPage() {
                 <select className={inputCls} value={pos.user_id} onChange={(e) => setPos((p) => ({ ...p, user_id: e.target.value }))}>
                   <option value="">Select…</option>
                   {uplineOptions.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.label}
-                    </option>
+                    <option key={o.id} value={o.id}>{o.label}</option>
                   ))}
                 </select>
               </Field>
@@ -384,9 +354,7 @@ export default function SettingsPage() {
               <Field label="Comp %">
                 <select className={inputCls} value={pos.comp} onChange={(e) => setPos((p) => ({ ...p, comp: Number(e.target.value) }))}>
                   {COMP_VALUES.map((v) => (
-                    <option key={v} value={v}>
-                      {v}%
-                    </option>
+                    <option key={v} value={v}>{v}%</option>
                   ))}
                 </select>
               </Field>
@@ -396,27 +364,20 @@ export default function SettingsPage() {
               </Field>
             </div>
 
-            <button onClick={updatePosition} className={saveWide}>
-              Save Position
-            </button>
+            <button onClick={updatePosition} className={saveWide}>Save Position</button>
           </div>
         )}
 
-        {/* THEMES */}
         {tab === 'themes' && (
           <div className="glass rounded-2xl border border-white/10 p-6">
             <div className="text-sm font-semibold">Theme (Agency Owners)</div>
-            <div className="text-xs text-white/55 mt-1">
-              Only agency owners can apply a theme. Downlines inherit their direct upline’s theme.
-            </div>
+            <div className="text-xs text-white/55 mt-1">Only agency owners can apply a theme. Downlines inherit their direct upline’s theme.</div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
               <Field label="Select Theme">
                 <select className={inputCls} value={themePick} onChange={(e) => setThemePick(e.target.value)}>
                   {THEMES.map((t) => (
-                    <option key={t.key} value={t.key}>
-                      {t.label}
-                    </option>
+                    <option key={t.key} value={t.key}>{t.label}</option>
                   ))}
                 </select>
               </Field>
@@ -428,14 +389,11 @@ export default function SettingsPage() {
               </Field>
             </div>
 
-            <button onClick={saveTheme} className={saveWide}>
-              Save Theme
-            </button>
+            <button onClick={saveTheme} className={saveWide}>Save Theme</button>
           </div>
         )}
       </div>
 
-      {/* INVITE MODAL */}
       {inviteOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-6">
           <div className="glass rounded-2xl border border-white/10 p-6 w-full max-w-3xl">
@@ -444,32 +402,19 @@ export default function SettingsPage() {
                 <div className="text-lg font-semibold">Add Agent</div>
                 <div className="text-xs text-white/55 mt-1">Invite to their own login (email).</div>
               </div>
-
-              <button onClick={() => setInviteOpen(false)} className={closeBtn}>
-                Close
-              </button>
+              <button onClick={() => setInviteOpen(false)} className={closeBtn}>Close</button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field label="First Name">
-                <input className={inputCls} value={invite.first_name} onChange={(e) => setInvite((p) => ({ ...p, first_name: e.target.value }))} />
-              </Field>
-
-              <Field label="Last Name">
-                <input className={inputCls} value={invite.last_name} onChange={(e) => setInvite((p) => ({ ...p, last_name: e.target.value }))} />
-              </Field>
-
-              <Field label="Email">
-                <input className={inputCls} value={invite.email} onChange={(e) => setInvite((p) => ({ ...p, email: e.target.value }))} />
-              </Field>
+              <Field label="First Name"><input className={inputCls} value={invite.first_name} onChange={(e) => setInvite((p) => ({ ...p, first_name: e.target.value }))} /></Field>
+              <Field label="Last Name"><input className={inputCls} value={invite.last_name} onChange={(e) => setInvite((p) => ({ ...p, last_name: e.target.value }))} /></Field>
+              <Field label="Email"><input className={inputCls} value={invite.email} onChange={(e) => setInvite((p) => ({ ...p, email: e.target.value }))} /></Field>
 
               <Field label="Upline (live agents)">
                 <select className={inputCls} value={invite.upline_id} onChange={(e) => setInvite((p) => ({ ...p, upline_id: e.target.value }))}>
                   <option value="">Select…</option>
                   {uplineOptions.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.label}
-                    </option>
+                    <option key={o.id} value={o.id}>{o.label}</option>
                   ))}
                 </select>
               </Field>
@@ -477,9 +422,7 @@ export default function SettingsPage() {
               <Field label="Comp %">
                 <select className={inputCls} value={invite.comp} onChange={(e) => setInvite((p) => ({ ...p, comp: Number(e.target.value) }))}>
                   {COMP_VALUES.map((v) => (
-                    <option key={v} value={v}>
-                      {v}%
-                    </option>
+                    <option key={v} value={v}>{v}%</option>
                   ))}
                 </select>
               </Field>
@@ -493,12 +436,7 @@ export default function SettingsPage() {
 
               <Field label="Agency Owner">
                 <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                  <input
-                    type="checkbox"
-                    checked={invite.is_agency_owner}
-                    onChange={(e) => setInvite((p) => ({ ...p, is_agency_owner: e.target.checked }))}
-                    className="h-5 w-5"
-                  />
+                  <input type="checkbox" checked={invite.is_agency_owner} onChange={(e) => setInvite((p) => ({ ...p, is_agency_owner: e.target.checked }))} className="h-5 w-5" />
                   <div className="text-sm">Mark as Agency Owner</div>
                 </div>
               </Field>
@@ -506,21 +444,15 @@ export default function SettingsPage() {
               <Field label="Theme">
                 <select className={inputCls} value={invite.theme} onChange={(e) => setInvite((p) => ({ ...p, theme: e.target.value }))}>
                   {THEMES.map((t) => (
-                    <option key={t.key} value={t.key}>
-                      {t.label}
-                    </option>
+                    <option key={t.key} value={t.key}>{t.label}</option>
                   ))}
                 </select>
               </Field>
             </div>
 
             <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => setInviteOpen(false)} className={closeBtn}>
-                Cancel
-              </button>
-              <button onClick={inviteAgent} className={saveBtn}>
-                Invite
-              </button>
+              <button onClick={() => setInviteOpen(false)} className={closeBtn}>Cancel</button>
+              <button onClick={inviteAgent} className="rounded-2xl bg-green-600 hover:bg-green-500 transition px-5 py-3 text-sm font-semibold">Invite</button>
             </div>
           </div>
         </div>
@@ -541,13 +473,8 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 const inputCls =
   'w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-white/20 focus:bg-white/7'
 
-const btnSoft = 'rounded-xl bg-white/10 hover:bg-white/15 transition px-3 py-2 text-xs'
-
 const closeBtn =
   'rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-4 py-3 text-sm font-semibold'
-
-const saveBtn =
-  'rounded-2xl bg-green-600 hover:bg-green-500 transition px-5 py-3 text-sm font-semibold'
 
 const saveWide =
   'mt-5 w-full rounded-2xl bg-green-600 hover:bg-green-500 transition px-4 py-3 text-sm font-semibold'
