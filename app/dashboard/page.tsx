@@ -2,324 +2,340 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Sidebar from '../components/Sidebar'
+import FlowLineChart from '../components/FlowLineChart'
+import CarrierDonut from '../components/CarrierDonut'
+import GoalDonuts from '../components/GoalDonuts'
 import { supabase } from '@/lib/supabaseClient'
 
 type DealRow = {
   id: string
-  agent_id: string
-  full_name: string | null
-  premium: number | null
-  coverage: number | null
-  company: string | null
+  user_id: string
   created_at: string
-}
-
-type Agent = {
-  agent_id: string
-  name: string
-  deals: number
-  premium: number
+  premium: any
+  company: string | null
 }
 
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
-  const [rows, setRows] = useState<DealRow[]>([])
+  const [deals, setDeals] = useState<DealRow[]>([])
 
   useEffect(() => {
-    load()
+    let alive = true
+
+    ;(async () => {
+      setLoading(true)
+
+      const { data: userRes } = await supabase.auth.getUser()
+      const user = userRes.user
+      if (!user) {
+        window.location.href = '/login'
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('deals')
+        .select('id,user_id,created_at,premium,company')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(500)
+
+      if (!alive) return
+
+      if (error) {
+        setDeals([])
+        setLoading(false)
+        return
+      }
+
+      setDeals((data as DealRow[]) || [])
+      setLoading(false)
+    })()
+
+    return () => {
+      alive = false
+    }
   }, [])
 
-  async function load() {
-    setLoading(true)
-    const { data } = await supabase
-      .from('deals')
-      .select('id, agent_id, full_name, premium, coverage, company, created_at')
-      .order('created_at', { ascending: false })
-      .limit(5000)
+  const now = new Date()
 
-    if (data) setRows(data as DealRow[])
-    setLoading(false)
+  const parsed = useMemo(() => {
+    return deals.map(d => {
+      const dt = d.created_at ? new Date(d.created_at) : new Date()
+      const premiumNum =
+        typeof d.premium === 'number'
+          ? d.premium
+          : typeof d.premium === 'string'
+          ? Number(d.premium.replace(/[^0-9.]/g, ''))
+          : Number(d.premium || 0)
+
+      return {
+        ...d,
+        dt,
+        premiumNum: isNaN(premiumNum) ? 0 : premiumNum,
+        companySafe: (d.company || 'Other').trim() || 'Other',
+      }
+    })
+  }, [deals])
+
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  const startOfWeek = (d: Date) => {
+    const day = d.getDay()
+    const diff = day === 0 ? -6 : 1 - day
+    const base = new Date(d)
+    base.setDate(d.getDate() + diff)
+    return startOfDay(base)
   }
+  const startOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1)
 
-  const agents = useMemo(() => computeAgents(rows), [rows])
+  const todayStart = startOfDay(now)
+  const weekStart = startOfWeek(now)
+  const monthStart = startOfMonth(now)
 
-  const teamTotalPremium = useMemo(() => sumPremium(rows), [rows])
-  const writingAgents = agents.length
-  const topCarrier = useMemo(() => computeTopCarrier(rows), [rows])
+  const todayDeals = useMemo(() => parsed.filter(d => d.dt >= todayStart), [parsed, todayStart])
+  const weekDeals = useMemo(() => parsed.filter(d => d.dt >= weekStart), [parsed, weekStart])
+  const monthDeals = useMemo(() => parsed.filter(d => d.dt >= monthStart), [parsed, monthStart])
 
-  const todayCount = useMemo(() => countSince(rows, startOfToday()), [rows])
-  const weekCount = useMemo(() => countSince(rows, startOfWeek()), [rows])
-  const monthCount = useMemo(() => countSince(rows, startOfMonth()), [rows])
+  const teamTotal = useMemo(() => monthDeals.reduce((s, d) => s + d.premiumNum, 0), [monthDeals])
 
-  // Donut goals (editable later via admin settings)
-  const weeklyGoalDeals = 30
-  const monthlyGoalDeals = 120
+  const writingAgents = useMemo(() => {
+    const uniq = new Set(monthDeals.map(d => d.user_id))
+    return uniq.size
+  }, [monthDeals])
 
-  const weeklyProgress = clamp01(weekCount / weeklyGoalDeals)
-  const monthlyProgress = clamp01(monthCount / monthlyGoalDeals)
+  const topCarrier = useMemo(() => {
+    const map = new Map<string, number>()
+    monthDeals.forEach(d => map.set(d.companySafe, (map.get(d.companySafe) || 0) + 1))
+    let best = '—'
+    let bestCount = 0
+    for (const [k, v] of map.entries()) {
+      if (v > bestCount) {
+        best = k
+        bestCount = v
+      }
+    }
+    return bestCount === 0 ? '—' : best
+  }, [monthDeals])
+
+  const last7 = useMemo(() => {
+    const days: { label: string; count: number }[] = []
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now)
+      d.setDate(now.getDate() - i)
+      const dStart = startOfDay(d)
+      const next = new Date(dStart)
+      next.setDate(dStart.getDate() + 1)
+
+      const count = parsed.filter(x => x.dt >= dStart && x.dt < next).length
+      const label = d.toLocaleDateString(undefined, { weekday: 'short' })
+      days.push({ label, count })
+    }
+    return days
+  }, [parsed])
+
+  const lineLabels = useMemo(() => last7.map(x => x.label), [last7])
+  const lineValues = useMemo(() => last7.map(x => x.count), [last7])
+
+  const carrierDist = useMemo(() => {
+    const map = new Map<string, number>()
+    monthDeals.forEach(d => map.set(d.companySafe, (map.get(d.companySafe) || 0) + 1))
+    const entries = Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, 6)
+    const labels = entries.length ? entries.map(e => e[0]) : ['No Data']
+    const values = entries.length ? entries.map(e => e[1]) : [100]
+    return { labels, values }
+  }, [monthDeals])
+
+  const weeklyGoal = 20
+  const monthlyGoal = 90
 
   return (
     <div className="min-h-screen bg-[#0b0f1a] text-white">
       <Sidebar />
 
-      <div className="ml-64 px-10 py-10">
-        {/* Header */}
-        <div className="mb-10 flex items-end justify-between">
+      <div className="ml-64">
+        <header className="px-10 pt-10 pb-6 flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
-            <p className="text-sm text-white/60 mt-1">Live overview of production.</p>
+            <p className="text-sm text-white/60 mt-1">
+              Morning Flow snapshot — clean signal, no noise.
+            </p>
           </div>
 
-          <button
-            onClick={() => load()}
-            className="glass px-4 py-2 text-sm font-medium hover:bg-white/10 transition"
-          >
-            Refresh
-          </button>
-        </div>
+          <div className="flex items-center gap-3">
+            <button className="glass px-4 py-2 text-sm font-medium hover:bg-white/10 transition">
+              Notifications
+            </button>
+            <a
+              href="/post-deal"
+              className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-semibold transition"
+            >
+              Post a Deal
+            </a>
+          </div>
+        </header>
 
-        {/* Top KPI row */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-          <Stat label="Team Total Premium" value={`$${money(teamTotalPremium)}`} />
-          <Stat label="Writing Agents" value={`${writingAgents}`} />
-          <Stat label="Top Carrier" value={topCarrier || (loading ? '—' : 'No data')} />
-        </div>
+        <main className="px-10 pb-12">
+          <section className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+            <MiniStat label="Team Total" value={loading ? '—' : `$${formatMoney(teamTotal)}`} />
+            <MiniStat label="Writing Agents" value={loading ? '—' : String(writingAgents)} />
+            <MiniStat label="Top Carrier" value={loading ? '—' : topCarrier} />
+          </section>
 
-        {/* Main grid: left content + right leaderboard preview */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* LEFT */}
-          <div className="lg:col-span-8 space-y-6">
-            {/* Deal velocity (today/week/month) */}
-            <div className="glass rounded-2xl border border-white/10 p-6">
+          <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 glass p-6">
               <div className="flex items-center justify-between mb-4">
-                <div>
-                  <div className="text-sm font-semibold">Active Production</div>
-                  <div className="text-xs text-white/60 mt-1">Deals submitted</div>
-                </div>
-                <div className="text-xs text-white/50">{loading ? 'Loading…' : 'Live'}</div>
+                <h2 className="text-base font-semibold">Flow Trend</h2>
+                <span className="text-xs text-white/60">Last 7 days</span>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <MiniStat label="Today" value={loading ? '—' : `${todayCount}`} />
-                <MiniStat label="This Week" value={loading ? '—' : `${weekCount}`} />
-                <MiniStat label="This Month" value={loading ? '—' : `${monthCount}`} />
-              </div>
-            </div>
-
-            {/* Goals + Donuts */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="glass rounded-2xl border border-white/10 p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <div className="text-sm font-semibold">Weekly Goal</div>
-                    <div className="text-xs text-white/60 mt-1">
-                      {weekCount}/{weeklyGoalDeals} deals
-                    </div>
-                  </div>
-                  <div className="text-xs text-white/50">Auto</div>
-                </div>
-                <Donut progress={weeklyProgress} />
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <FlowLineChart labels={lineLabels} values={lineValues} />
               </div>
 
-              <div className="glass rounded-2xl border border-white/10 p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <div className="text-sm font-semibold">Monthly Goal</div>
-                    <div className="text-xs text-white/60 mt-1">
-                      {monthCount}/{monthlyGoalDeals} deals
-                    </div>
-                  </div>
-                  <div className="text-xs text-white/50">Auto</div>
-                </div>
-                <Donut progress={monthlyProgress} />
+              <div className="mt-6">
+                <GoalDonuts
+                  weeklyCurrent={weekDeals.length}
+                  weeklyGoal={weeklyGoal}
+                  monthlyCurrent={monthDeals.length}
+                  monthlyGoal={monthlyGoal}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+                <KPI title="Today" value={loading ? '—' : String(todayDeals.length)} sub="Deals submitted" />
+                <KPI title="This Week" value={loading ? '—' : String(weekDeals.length)} sub="Deals submitted" />
+                <KPI title="This Month" value={loading ? '—' : String(monthDeals.length)} sub="Deals submitted" />
               </div>
             </div>
-          </div>
 
-          {/* RIGHT */}
-          <div className="lg:col-span-4">
-            <div className="glass rounded-2xl border border-white/10 p-6">
+            <div className="glass p-6">
               <div className="flex items-center justify-between mb-4">
-                <div className="text-sm font-semibold">Leaderboard Preview</div>
-                <a href="/leaderboard" className="text-xs text-blue-400 hover:underline">
-                  View full →
-                </a>
+                <h2 className="text-base font-semibold">Leaderboard</h2>
+                <span className="text-xs text-white/60">This month</span>
               </div>
 
-              {loading && (
-                <div className="text-sm text-white/60 py-10 text-center">Loading…</div>
-              )}
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 mb-5">
+                <CarrierDonut labels={carrierDist.labels} values={carrierDist.values} />
+              </div>
 
-              {!loading && agents.length === 0 && (
-                <div className="text-sm text-white/60 py-10 text-center">No data yet.</div>
-              )}
+              <div className="space-y-3">
+                <Leader rank={1} name="You" amount={loading ? '—' : `$${formatMoney(teamTotal)}`} highlight />
+              </div>
 
-              {!loading &&
-                agents.slice(0, 8).map((a, idx) => (
-                  <div
-                    key={a.agent_id}
-                    className="flex items-center justify-between py-3 border-t border-white/10 first:border-t-0"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-7 h-7 rounded-xl border border-white/10 bg-white/5 flex items-center justify-center text-xs font-semibold">
-                        {idx + 1}
-                      </div>
-                      <div className="font-medium truncate max-w-[160px]">{a.name}</div>
-                    </div>
-                    <div className="font-semibold">${money(a.premium)}</div>
-                  </div>
-                ))}
+              <div className="mt-4 text-xs text-white/50">Admin team leaderboard comes next.</div>
             </div>
-          </div>
-        </div>
+          </section>
+
+          <section className="mt-6 glass p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-semibold">Recent Activity</h2>
+              <span className="text-xs text-white/60">Latest submissions</span>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 overflow-hidden">
+              <Row head left="Carrier" mid="Premium" right="Time" />
+              {(loading ? [] : parsed.slice(0, 6)).map(d => (
+                <Row
+                  key={d.id}
+                  left={d.companySafe}
+                  mid={`$${formatMoney(d.premiumNum)}`}
+                  right={timeAgo(d.dt)}
+                />
+              ))}
+              {!loading && parsed.length === 0 && <Row left="—" mid="No deals yet" right="—" />}
+            </div>
+          </section>
+        </main>
       </div>
     </div>
   )
 }
 
-/* ---------- UI components ---------- */
-
-function Stat({ label, value }: { label: string; value: string }) {
+function KPI({ title, value, sub }: { title: string; value: string; sub: string }) {
   return (
-    <div className="glass p-6 rounded-2xl border border-white/10">
-      <div className="text-xs text-white/60 mb-1">{label}</div>
-      <div className="text-2xl font-semibold">{value}</div>
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+      <p className="text-xs text-white/60">{title}</p>
+      <div className="mt-1 flex items-baseline gap-2">
+        <span className="text-3xl font-semibold">{value}</span>
+        <span className="text-xs text-white/50">{sub}</span>
+      </div>
     </div>
   )
 }
 
 function MiniStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-      <div className="text-[11px] text-white/55">{label}</div>
-      <div className="mt-1 text-xl font-semibold">{value}</div>
+    <div className="glass p-6">
+      <p className="text-sm text-white/60">{label}</p>
+      <p className="text-2xl font-semibold mt-1">{value}</p>
     </div>
   )
 }
 
-function Donut({ progress }: { progress: number }) {
-  const size = 160
-  const stroke = 14
-  const r = (size - stroke) / 2
-  const c = 2 * Math.PI * r
-  const offset = c * (1 - progress)
-
+function Leader({
+  rank,
+  name,
+  amount,
+  highlight,
+}: {
+  rank: number
+  name: string
+  amount: string
+  highlight?: boolean
+}) {
   return (
-    <div className="flex items-center justify-center py-2">
-      <div className="relative" style={{ width: size, height: size }}>
-        <svg width={size} height={size} className="block">
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={r}
-            stroke="rgba(255,255,255,0.10)"
-            strokeWidth={stroke}
-            fill="transparent"
-          />
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={r}
-            stroke="rgba(59,130,246,0.95)"
-            strokeWidth={stroke}
-            fill="transparent"
-            strokeLinecap="round"
-            strokeDasharray={c}
-            strokeDashoffset={offset}
-            transform={`rotate(-90 ${size / 2} ${size / 2})`}
-          />
-        </svg>
-
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="text-center">
-            <div className="text-3xl font-semibold">{Math.round(progress * 100)}%</div>
-            <div className="text-xs text-white/60 mt-1">Complete</div>
-          </div>
+    <div
+      className={`flex items-center justify-between rounded-2xl border border-white/10 px-4 py-3 ${
+        highlight ? 'bg-white/10' : 'bg-white/5'
+      }`}
+    >
+      <div className="flex items-center gap-3">
+        <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm font-bold ${highlight ? 'bg-blue-600' : 'bg-white/10'}`}>
+          {rank}
         </div>
+        <div>
+          <div className={`${highlight ? 'text-base font-semibold' : 'text-sm font-medium'}`}>{name}</div>
+          <div className="text-xs text-white/50">Monthly production</div>
+        </div>
+      </div>
+
+      <div className={`${highlight ? 'text-lg font-semibold' : 'text-sm font-semibold'} text-green-400`}>
+        {amount}
       </div>
     </div>
   )
 }
 
-/* ---------- data helpers ---------- */
-
-function computeAgents(rows: DealRow[]) {
-  const map = new Map<string, Agent>()
-  for (const r of rows) {
-    const id = r.agent_id
-    if (!id) continue
-    if (!map.has(id)) {
-      map.set(id, {
-        agent_id: id,
-        name: (r.full_name || 'Agent').trim(),
-        deals: 0,
-        premium: 0,
-      })
-    }
-    const a = map.get(id)!
-    a.deals += 1
-    a.premium += Number(r.premium || 0)
-  }
-  return Array.from(map.values()).sort((a, b) => b.premium - a.premium)
+function Row({
+  head,
+  left,
+  mid,
+  right,
+}: {
+  head?: boolean
+  left: string
+  mid: string
+  right: string
+}) {
+  return (
+    <div className={`grid grid-cols-3 px-4 py-3 border-b border-white/10 ${head ? 'text-xs text-white/60 bg-white/5' : 'text-sm'}`}>
+      <div>{left}</div>
+      <div className="text-center">{mid}</div>
+      <div className="text-right">{right}</div>
+    </div>
+  )
 }
 
-function computeTopCarrier(rows: DealRow[]) {
-  const map = new Map<string, number>()
-  for (const r of rows) {
-    const c = (r.company || '').trim()
-    if (!c) continue
-    map.set(c, (map.get(c) || 0) + 1)
-  }
-  let best = ''
-  let bestCount = 0
-  for (const [k, v] of map.entries()) {
-    if (v > bestCount) {
-      best = k
-      bestCount = v
-    }
-  }
-  return best
+function formatMoney(n: number) {
+  return Math.round(n).toLocaleString()
 }
 
-function sumPremium(rows: DealRow[]) {
-  return rows.reduce((a, r) => a + Number(r.premium || 0), 0)
-}
-
-function countSince(rows: DealRow[], since: Date) {
-  const t = since.getTime()
-  return rows.filter((r) => new Date(r.created_at).getTime() >= t).length
-}
-
-function startOfToday() {
-  const d = new Date()
-  d.setHours(0, 0, 0, 0)
-  return d
-}
-
-function startOfWeek() {
-  const d = new Date()
-  const day = d.getDay()
-  const diff = (day + 6) % 7
-  d.setDate(d.getDate() - diff)
-  d.setHours(0, 0, 0, 0)
-  return d
-}
-
-function startOfMonth() {
-  const d = new Date()
-  d.setDate(1)
-  d.setHours(0, 0, 0, 0)
-  return d
-}
-
-function money(n: number) {
-  return Number(n || 0).toLocaleString(undefined, {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  })
-}
-
-function clamp01(n: number) {
-  if (!Number.isFinite(n)) return 0
-  return Math.max(0, Math.min(1, n))
+function timeAgo(d: Date) {
+  const diff = Date.now() - d.getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'now'
+  if (mins < 60) return `${mins}m`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h`
+  const days = Math.floor(hrs / 24)
+  return `${days}d`
 }
