@@ -1,21 +1,7 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import FlowDatePicker from './FlowDatePicker'
-
-const TIMES = [
-  '08:00', '08:30',
-  '09:00', '09:30',
-  '10:00', '10:30',
-  '11:00', '11:30',
-  '12:00', '12:30',
-  '13:00', '13:30',
-  '14:00', '14:30',
-  '15:00', '15:30',
-  '16:00', '16:30',
-  '17:00', '17:30',
-  '18:00', '18:30',
-]
+import { useEffect, useMemo, useRef, useState } from 'react'
+import FlowDatePicker from '@/app/components/FlowDatePicker'
 
 export default function FlowDateTimePicker({
   value,
@@ -26,62 +12,128 @@ export default function FlowDateTimePicker({
   onChange: (v: string) => void
   placeholder?: string
 }) {
-  const [date, setDate] = useState(() => (value ? value.split('T')[0] : ''))
-  const [time, setTime] = useState(() => {
-    if (!value) return ''
-    const t = value.split('T')[1] || ''
-    return t.slice(0, 5)
-  })
+  // store as ISO string or empty
+  const initialISO = useMemo(() => (value ? value : ''), [value])
 
-  useMemo(() => {
-    // keep internal state synced if parent changes
+  // derive date (YYYY-MM-DD) and time (HH:MM)
+  const [date, setDate] = useState<string>(() => (initialISO ? isoToDate(initialISO) : ''))
+  const [time, setTime] = useState<string>(() => (initialISO ? isoToTime(initialISO) : '09:00'))
+
+  useEffect(() => {
     if (!value) return
+    setDate(isoToDate(value))
+    setTime(isoToTime(value))
   }, [value])
 
-  function commit(nextDate: string, nextTime: string) {
-    if (!nextDate || !nextTime) {
+  useEffect(() => {
+    if (!date) {
       onChange('')
       return
     }
-    onChange(`${nextDate}T${nextTime}:00.000Z`)
-  }
+    // build UTC ISO (safe for storage)
+    const iso = buildUTCISO(date, time || '09:00')
+    onChange(iso)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date, time])
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-      <FlowDatePicker
-        value={date}
-        onChange={(v) => {
-          setDate(v)
-          commit(v, time)
-        }}
-        placeholder={placeholder}
-      />
+      <FlowDatePicker value={date} onChange={setDate} placeholder={placeholder} />
 
-      <div className="relative">
-        <select
-          value={time}
-          onChange={(e) => {
-            const v = e.target.value
-            setTime(v)
-            commit(date, v)
-          }}
-          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none hover:bg-white/7 transition"
-        >
-          <option value="">Select time</option>
-          {TIMES.map((t) => (
-            <option key={t} value={t}>
-              {to12h(t)}
-            </option>
-          ))}
-        </select>
-      </div>
+      <TimePicker value={time} onChange={setTime} />
     </div>
   )
 }
 
-function to12h(t: string) {
-  const [hh, mm] = t.split(':').map(Number)
-  const ampm = hh >= 12 ? 'PM' : 'AM'
-  const h = ((hh + 11) % 12) + 1
-  return `${h}:${String(mm).padStart(2, '0')} ${ampm}`
+function TimePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const anchorRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (!open) return
+      const t = e.target as Node
+      if (anchorRef.current && !anchorRef.current.contains(t)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [open])
+
+  const slots = useMemo(() => buildTimeSlots(), [])
+
+  return (
+    <div className="relative" ref={anchorRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((s) => !s)}
+        className="w-full text-left rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none hover:bg-white/7 transition flex items-center justify-between"
+      >
+        <span className={value ? 'text-white' : 'text-white/50'}>{value || 'Select time'}</span>
+        <span className="text-white/50">🕒</span>
+      </button>
+
+      {open && (
+        <div className="absolute z-50 mt-2 w-full rounded-2xl border border-white/10 bg-[#0b0f1a]/90 backdrop-blur-xl shadow-2xl overflow-hidden">
+          <div className="max-h-[280px] overflow-auto p-2">
+            {slots.map((t) => {
+              const active = t === value
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => {
+                    onChange(t)
+                    setOpen(false)
+                  }}
+                  className={[
+                    'w-full text-left px-3 py-2 rounded-xl text-sm border transition',
+                    active
+                      ? 'bg-blue-600 border-blue-500/60 text-white'
+                      : 'bg-white/5 border-white/10 hover:bg-white/10',
+                  ].join(' ')}
+                >
+                  {t}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function buildTimeSlots() {
+  const out: string[] = []
+  for (let h = 7; h <= 21; h++) {
+    for (const m of [0, 30]) {
+      out.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`)
+    }
+  }
+  return out
+}
+
+// value stored like: 2026-01-17T14:30:00.000Z
+function isoToDate(iso: string) {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const y = d.getUTCFullYear()
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d.getUTCDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function isoToTime(iso: string) {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '09:00'
+  const h = String(d.getUTCHours()).padStart(2, '0')
+  const m = String(d.getUTCMinutes()).padStart(2, '0')
+  return `${h}:${m}`
+}
+
+function buildUTCISO(date: string, time: string) {
+  const [yy, mm, dd] = date.split('-').map((x) => Number(x))
+  const [hh, mi] = time.split(':').map((x) => Number(x))
+  const d = new Date(Date.UTC(yy, (mm || 1) - 1, dd || 1, hh || 0, mi || 0, 0))
+  return d.toISOString()
 }
