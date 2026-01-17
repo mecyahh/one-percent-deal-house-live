@@ -13,15 +13,21 @@ type GoalProps = {
   accent?: 'blue' | 'green'
 }
 
-export default function GoalDonuts() {
-  // MOCK for now (we’ll wire Supabase + admin edit later)
-  const weekly = { current: 7, goal: 20 }
-  const monthly = { current: 31, goal: 90 }
-
+export default function GoalDonuts({
+  weeklyCurrent,
+  weeklyGoal,
+  monthlyCurrent,
+  monthlyGoal,
+}: {
+  weeklyCurrent: number
+  weeklyGoal: number
+  monthlyCurrent: number
+  monthlyGoal: number
+}) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <GoalDonut title="Weekly Goal" current={weekly.current} goal={weekly.goal} accent="blue" />
-      <GoalDonut title="Monthly Goal" current={monthly.current} goal={monthly.goal} accent="blue" />
+      <GoalDonut title="Weekly Goal" current={weeklyCurrent} goal={weeklyGoal} accent="blue" />
+      <GoalDonut title="Monthly Goal" current={monthlyCurrent} goal={monthlyGoal} accent="blue" />
     </div>
   )
 }
