@@ -9,6 +9,9 @@ type Carrier = {
   name: string
   sort_order: number
   active: boolean
+  eapp_url: string | null
+  portal_url: string | null
+  support_phone: string | null
 }
 
 type Account = {
@@ -18,14 +21,21 @@ type Account = {
   producer_number: string | null
   username: string | null
   password: string | null
-  notes: string | null
   status: 'active' | 'pending' | 'inactive' | string
   updated_at: string
 }
 
+type Licenses = {
+  agent_id: string
+  npn: string | null
+  resident_license: string | null
+  florida_license: string | null
+}
+
 export default function CarrierOutlinePage() {
   const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState<string | null>(null)
+  const [savingCarrier, setSavingCarrier] = useState<string | null>(null)
+  const [savingLicenses, setSavingLicenses] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
 
   const [carriers, setCarriers] = useState<Carrier[]>([])
@@ -33,6 +43,12 @@ export default function CarrierOutlinePage() {
   const [search, setSearch] = useState('')
   const [showPasswords, setShowPasswords] = useState(false)
 
+  // licenses
+  const [npn, setNpn] = useState('')
+  const [residentLicense, setResidentLicense] = useState('')
+  const [floridaLicense, setFloridaLicense] = useState('')
+
+  // per-carrier drafts
   const [draft, setDraft] = useState<
     Record<
       string,
@@ -40,7 +56,6 @@ export default function CarrierOutlinePage() {
         producer_number: string
         username: string
         password: string
-        notes: string
         status: 'active' | 'pending' | 'inactive'
       }
     >
@@ -62,7 +77,7 @@ export default function CarrierOutlinePage() {
 
     const cRes = await supabase
       .from('carriers')
-      .select('id, name, sort_order, active')
+      .select('id, name, sort_order, active, eapp_url, portal_url, support_phone')
       .eq('active', true)
       .order('sort_order', { ascending: true })
       .order('name', { ascending: true })
@@ -75,13 +90,26 @@ export default function CarrierOutlinePage() {
 
     const aRes = await supabase
       .from('agent_carrier_accounts')
-      .select('id, agent_id, carrier_id, producer_number, username, password, notes, status, updated_at')
+      .select('id, agent_id, carrier_id, producer_number, username, password, status, updated_at')
       .eq('agent_id', uid)
 
     if (aRes.error) {
       setToast('Could not load your carrier accounts (RLS)')
       setLoading(false)
       return
+    }
+
+    const lRes = await supabase
+      .from('agent_licenses')
+      .select('agent_id, npn, resident_license, florida_license')
+      .eq('agent_id', uid)
+      .maybeSingle()
+
+    if (!lRes.error && lRes.data) {
+      const l = lRes.data as Licenses
+      setNpn(l.npn || '')
+      setResidentLicense(l.resident_license || '')
+      setFloridaLicense(l.florida_license || '')
     }
 
     const carrierList = (cRes.data || []) as Carrier[]
@@ -97,7 +125,6 @@ export default function CarrierOutlinePage() {
         producer_number: existing?.producer_number || '',
         username: existing?.username || '',
         password: existing?.password || '',
-        notes: existing?.notes || '',
         status: (existing?.status as any) || 'active',
       }
     }
@@ -117,20 +144,46 @@ export default function CarrierOutlinePage() {
   function setField(carrierId: string, field: keyof (typeof draft)[string], value: any) {
     setDraft((prev) => ({
       ...prev,
-      [carrierId]: {
-        ...prev[carrierId],
-        [field]: value,
-      },
+      [carrierId]: { ...prev[carrierId], [field]: value },
     }))
   }
 
-  async function save(carrierId: string) {
-    setSaving(carrierId)
+  async function saveLicenses() {
+    setSavingLicenses(true)
 
     const userRes = await supabase.auth.getUser()
     const uid = userRes.data.user?.id
     if (!uid) {
-      setSaving(null)
+      setSavingLicenses(false)
+      return
+    }
+
+    const payload = {
+      agent_id: uid,
+      npn: npn.trim() || null,
+      resident_license: residentLicense.trim() || null,
+      florida_license: floridaLicense.trim() || null,
+    }
+
+    const res = await supabase.from('agent_licenses').upsert(payload, { onConflict: 'agent_id' })
+
+    if (res.error) {
+      setToast('Could not save licenses')
+      setSavingLicenses(false)
+      return
+    }
+
+    setToast('Saved ✅')
+    setSavingLicenses(false)
+  }
+
+  async function saveCarrier(carrierId: string) {
+    setSavingCarrier(carrierId)
+
+    const userRes = await supabase.auth.getUser()
+    const uid = userRes.data.user?.id
+    if (!uid) {
+      setSavingCarrier(null)
       return
     }
 
@@ -141,30 +194,23 @@ export default function CarrierOutlinePage() {
       producer_number: d.producer_number.trim() || null,
       username: d.username.trim() || null,
       password: d.password.trim() || null,
-      notes: d.notes.trim() || null,
       status: d.status,
     }
 
     const existing = accounts[carrierId]
-    let err: any = null
+    const res = existing?.id
+      ? await supabase.from('agent_carrier_accounts').update(payload).eq('id', existing.id)
+      : await supabase.from('agent_carrier_accounts').insert(payload)
 
-    if (existing?.id) {
-      const res = await supabase.from('agent_carrier_accounts').update(payload).eq('id', existing.id)
-      err = res.error
-    } else {
-      const res = await supabase.from('agent_carrier_accounts').insert(payload)
-      err = res.error
-    }
-
-    if (err) {
+    if (res.error) {
       setToast('Save failed')
-      setSaving(null)
+      setSavingCarrier(null)
       return
     }
 
     setToast('Saved ✅')
+    setSavingCarrier(null)
     await load()
-    setSaving(null)
   }
 
   async function clearCarrier(carrierId: string) {
@@ -173,7 +219,6 @@ export default function CarrierOutlinePage() {
       setField(carrierId, 'producer_number', '')
       setField(carrierId, 'username', '')
       setField(carrierId, 'password', '')
-      setField(carrierId, 'notes', '')
       setField(carrierId, 'status', 'active')
       return
     }
@@ -204,7 +249,7 @@ export default function CarrierOutlinePage() {
         <div className="mb-8 flex items-end justify-between">
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">Carrier Outline</h1>
-            <p className="text-sm text-white/60 mt-1">Your contracts, logins, and producer numbers.</p>
+            <p className="text-sm text-white/60 mt-1">Producer numbers + logins + quick links.</p>
           </div>
 
           <div className="flex items-center gap-3">
@@ -235,6 +280,41 @@ export default function CarrierOutlinePage() {
           </div>
         </div>
 
+        {/* LICENSES TOP */}
+        <div className="glass rounded-2xl border border-white/10 p-6 mb-6">
+          <div className="text-sm font-semibold mb-4">Licenses</div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Field label="National Producer Number">
+              <input className={inputCls} value={npn} onChange={(e) => setNpn(e.target.value)} placeholder="NPN" />
+            </Field>
+            <Field label="Resident License Number">
+              <input
+                className={inputCls}
+                value={residentLicense}
+                onChange={(e) => setResidentLicense(e.target.value)}
+                placeholder="Resident License"
+              />
+            </Field>
+            <Field label="Florida License Number">
+              <input
+                className={inputCls}
+                value={floridaLicense}
+                onChange={(e) => setFloridaLicense(e.target.value)}
+                placeholder="FL License"
+              />
+            </Field>
+          </div>
+
+          <button
+            onClick={saveLicenses}
+            disabled={savingLicenses}
+            className="mt-5 rounded-2xl bg-blue-600 hover:bg-blue-500 transition px-5 py-3 text-sm font-semibold disabled:opacity-50"
+          >
+            {savingLicenses ? 'Saving…' : 'Save Licenses'}
+          </button>
+        </div>
+
         {loading && <div className="text-white/60">Loading…</div>}
 
         {!loading && (
@@ -242,7 +322,7 @@ export default function CarrierOutlinePage() {
             {filtered.map((c) => {
               const d = draft[c.id]
               const has = !!accounts[c.id]
-              const isSaving = saving === c.id
+              const isSaving = savingCarrier === c.id
 
               return (
                 <div key={c.id} className="glass rounded-2xl border border-white/10 p-6">
@@ -305,17 +385,19 @@ export default function CarrierOutlinePage() {
                     </Field>
                   </div>
 
-                  <Field label="Notes" className="mt-4">
-                    <textarea
-                      className={`${inputCls} min-h-[110px]`}
-                      value={d?.notes || ''}
-                      onChange={(e) => setField(c.id, 'notes', e.target.value)}
-                      placeholder="Anything important…"
-                    />
-                  </Field>
+                  {/* E-App | Agent Portal, Phone below */}
+                  <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <LinkCard label="E-App" href={c.eapp_url} />
+                      <LinkCard label="Agent Portal" href={c.portal_url} />
+                    </div>
+                    <div className="mt-3 text-center text-sm text-white/80">
+                      {c.support_phone ? c.support_phone : '—'}
+                    </div>
+                  </div>
 
                   <button
-                    onClick={() => save(c.id)}
+                    onClick={() => saveCarrier(c.id)}
                     disabled={isSaving}
                     className="mt-5 w-full rounded-2xl bg-blue-600 hover:bg-blue-500 transition px-4 py-3 text-sm font-semibold disabled:opacity-50"
                   >
@@ -347,8 +429,27 @@ function StatusPill({ status }: { status: string }) {
       : status === 'pending'
       ? 'bg-yellow-500/12 border-yellow-400/25 text-yellow-200'
       : 'bg-white/6 border-white/12 text-white/70'
-
   return <span className={`text-[11px] px-2 py-1 rounded-xl border ${cls}`}>{status}</span>
+}
+
+function LinkCard({ label, href }: { label: string; href: string | null }) {
+  const disabled = !href
+  return (
+    <a
+      href={href || '#'}
+      target="_blank"
+      rel="noreferrer"
+      className={[
+        'rounded-2xl border px-4 py-3 text-sm font-semibold transition flex items-center justify-between',
+        disabled
+          ? 'border-white/10 bg-white/5 text-white/40 pointer-events-none'
+          : 'border-white/10 bg-white/5 hover:bg-white/10 text-white/90',
+      ].join(' ')}
+    >
+      <span>{label}</span>
+      <span className="text-xs opacity-60">↗</span>
+    </a>
+  )
 }
 
 const inputCls =
