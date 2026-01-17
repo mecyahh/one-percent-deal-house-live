@@ -39,6 +39,13 @@ const QUICK = [
   { k: 'custom', label: 'Custom', hours: null },
 ] as const
 
+const TABS = [
+  { k: 'due', label: 'Due Now' },
+  { k: 'upcoming', label: 'Upcoming' },
+  { k: 'all', label: 'All' },
+  { k: 'completed', label: 'Completed' },
+] as const
+
 export default function FollowUpsPage() {
   const router = useRouter()
 
@@ -47,6 +54,9 @@ export default function FollowUpsPage() {
   const [rows, setRows] = useState<FollowUp[]>([])
   const [search, setSearch] = useState('')
   const [quickPick, setQuickPick] = useState<typeof QUICK[number]['k']>('24')
+  const [tab, setTab] = useState<(typeof TABS)[number]['k']>('upcoming')
+
+  const [alertsOn, setAlertsOn] = useState(true)
 
   const [form, setForm] = useState<Form>({
     full_name: '',
@@ -73,7 +83,7 @@ export default function FollowUpsPage() {
       .limit(3000)
 
     if (error) {
-      setToast('Could not load Follow Ups (RLS)')
+      setToast('Could not load Follow Ups')
       setLoading(false)
       return
     }
@@ -82,18 +92,6 @@ export default function FollowUpsPage() {
     setLoading(false)
   }
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return rows
-    return rows.filter((r) => {
-      const blob = [r.full_name, r.phone, r.company, r.notes, r.client_dob, r.outcome]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-      return blob.includes(q)
-    })
-  }, [rows, search])
-
   function set<K extends keyof Form>(k: K, v: Form[K]) {
     setForm((p) => ({ ...p, [k]: v }))
   }
@@ -101,7 +99,6 @@ export default function FollowUpsPage() {
   function applyQuick(k: typeof QUICK[number]['k']) {
     setQuickPick(k)
     if (k === 'custom') return
-
     const spec = QUICK.find((x) => x.k === k)!
     const d = new Date(Date.now() + (spec.hours || 0) * 3600 * 1000)
     const iso = `${toISO(d)}T${toHM(d)}:00.000Z`
@@ -134,10 +131,15 @@ export default function FollowUpsPage() {
     setToast('Submitted ✅')
     setForm({ full_name: '', phone: '', client_dob: '', coverage: '', company: '', notes: '', follow_up_at: '' })
     setQuickPick('24')
+    setTab('upcoming')
     load()
   }
 
-  async function setOutcome(id: string, outcome: 'follow_up' | 'denied_coverage') {
+  function goCloseDeal(id: string) {
+    router.push(`/close-deal/${id}`)
+  }
+
+  async function setOutcome(id: string, outcome: 'closed_deal' | 'follow_up' | 'denied_coverage') {
     const { error } = await supabase.from('follow_ups').update({ outcome }).eq('id', id)
     if (error) {
       setToast('Update failed')
@@ -146,9 +148,80 @@ export default function FollowUpsPage() {
     setRows((p) => p.map((r) => (r.id === id ? { ...r, outcome } : r)))
   }
 
-  function goCloseDeal(followUpId: string) {
-    router.push(`/close-deal/${followUpId}`)
+  async function snooze(id: string, hours: number) {
+    const next = new Date(Date.now() + hours * 3600 * 1000).toISOString()
+    const { error } = await supabase.from('follow_ups').update({ follow_up_at: next, outcome: 'follow_up' }).eq('id', id)
+    if (error) {
+      setToast('Snooze failed')
+      return
+    }
+    setRows((p) => p.map((r) => (r.id === id ? { ...r, follow_up_at: next, outcome: 'follow_up' } : r)))
   }
+
+  const computed = useMemo(() => {
+    const now = Date.now()
+    const q = search.trim().toLowerCase()
+
+    const withMeta = rows.map((r) => {
+      const due = r.follow_up_at ? new Date(r.follow_up_at).getTime() <= now : false
+      const completed = (r.outcome || '').toLowerCase() === 'closed_deal' || (r.outcome || '').toLowerCase() === 'denied_coverage'
+      return { ...r, due, completed }
+    })
+
+    const filteredSearch = !q
+      ? withMeta
+      : withMeta.filter((r) => {
+          const blob = [r.full_name, r.phone, r.company, r.notes, r.client_dob, r.outcome]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase()
+          return blob.includes(q)
+        })
+
+    const due = filteredSearch.filter((r) => r.due && !r.completed)
+    const upcoming = filteredSearch.filter((r) => !r.due && !r.completed)
+    const completed = filteredSearch.filter((r) => r.completed)
+    const all = filteredSearch
+
+    return {
+      due,
+      upcoming,
+      all,
+      completed,
+      counts: {
+        due: rows.filter((r) => (r.follow_up_at ? new Date(r.follow_up_at).getTime() <= now : false) && !isCompleted(r)).length,
+        upcoming: rows.filter((r) => !(r.follow_up_at ? new Date(r.follow_up_at).getTime() <= now : false) && !isCompleted(r)).length,
+        all: rows.length,
+        completed: rows.filter((r) => isCompleted(r)).length,
+      },
+    }
+  }, [rows, search])
+
+  const list = computed[tab]
+
+  useEffect(() => {
+    if (!alertsOn) return
+    // fire due notifications once per follow-up id
+    const now = Date.now()
+    for (const r of rows) {
+      const due = r.follow_up_at ? new Date(r.follow_up_at).getTime() <= now : false
+      if (!due) continue
+      if (isCompleted(r)) continue
+
+      const key = `due_${r.id}`
+      const already = localStorage.getItem(key)
+      if (already) continue
+
+      localStorage.setItem(key, '1')
+      pushNotification({
+        id: r.id,
+        title: 'Follow Up Due Now',
+        body: `Call ${r.full_name || 'client'} back`,
+        href: '/follow-ups',
+      })
+      playChime()
+    }
+  }, [rows, alertsOn])
 
   return (
     <div className="min-h-screen bg-[#0b0f1a] text-white">
@@ -171,26 +244,19 @@ export default function FollowUpsPage() {
         <div className="mb-8 flex items-end justify-between">
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">Follow Ups</h1>
-            <p className="text-sm text-white/60 mt-1">Simple form + due list + outcomes.</p>
+            <p className="text-sm text-white/60 mt-1">Fast. Simple. No deals slipping.</p>
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="glass rounded-2xl border border-white/10 px-3 py-2 flex items-center gap-2">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Zm6.5 1 4-4"
-                  stroke="rgba(255,255,255,0.65)"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                />
-              </svg>
-              <input
-                className="bg-transparent outline-none text-sm w-72 placeholder:text-white/40"
-                placeholder="Search…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
+            <button
+              onClick={() => setAlertsOn((v) => !v)}
+              className={[
+                'rounded-2xl border px-4 py-2 text-sm font-semibold transition',
+                alertsOn ? 'bg-green-600/25 border-green-500/40 text-green-100' : 'bg-white/5 border-white/10 hover:bg-white/10',
+              ].join(' ')}
+            >
+              {alertsOn ? 'Alerts On' : 'Enable Alerts'}
+            </button>
 
             <NotificationsBell />
 
@@ -198,6 +264,22 @@ export default function FollowUpsPage() {
               Refresh
             </button>
           </div>
+        </div>
+
+        {/* TABS */}
+        <div className="mb-6 flex flex-wrap gap-2">
+          {TABS.map((t) => (
+            <button
+              key={t.k}
+              onClick={() => setTab(t.k)}
+              className={[
+                'rounded-2xl border px-4 py-2 text-sm font-semibold transition',
+                tab === t.k ? 'bg-white/10 border-white/15' : 'bg-white/5 border-white/10 hover:bg-white/10',
+              ].join(' ')}
+            >
+              {t.label} ({computed.counts[t.k]})
+            </button>
+          ))}
         </div>
 
         {/* FORM */}
@@ -218,7 +300,14 @@ export default function FollowUpsPage() {
             </Field>
 
             <Field label="Company">
-              <input className={inputCls} value={form.company} onChange={(e) => set('company', e.target.value)} />
+              <select className={inputCls} value={form.company} onChange={(e) => set('company', e.target.value)}>
+                <option value="">Select…</option>
+                {CARRIERS.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
             </Field>
 
             <Field label="Coverage">
@@ -229,10 +318,6 @@ export default function FollowUpsPage() {
               <FlowDateTimePicker value={form.follow_up_at} onChange={(v) => set('follow_up_at', v)} />
             </Field>
           </div>
-
-          <Field label="Notes" className="mt-4">
-            <textarea className={`${inputCls} min-h-[120px]`} value={form.notes} onChange={(e) => set('notes', e.target.value)} />
-          </Field>
 
           <div className="mt-4 flex flex-wrap gap-2">
             {QUICK.map((q) => (
@@ -249,25 +334,45 @@ export default function FollowUpsPage() {
             ))}
           </div>
 
+          <Field label="Notes" className="mt-4">
+            <textarea className={`${inputCls} min-h-[120px]`} value={form.notes} onChange={(e) => set('notes', e.target.value)} />
+          </Field>
+
           <button onClick={submit} className="mt-5 w-full rounded-2xl bg-blue-600 hover:bg-blue-500 transition px-4 py-3 text-sm font-semibold">
-            Submit
+            Submit Follow Up
           </button>
         </div>
 
         {/* LIST */}
         <div className="glass rounded-2xl border border-white/10 overflow-hidden">
           <div className="px-6 py-4 bg-white/5 flex items-center justify-between">
-            <div className="text-sm font-semibold">Due</div>
-            <div className="text-xs text-white/60">{filtered.length.toLocaleString()} items</div>
+            <div className="text-sm font-semibold">
+              {tab === 'due' ? 'Due Now' : tab === 'upcoming' ? 'Upcoming' : tab === 'completed' ? 'Completed' : 'All'}
+            </div>
+
+            <div className="glass rounded-2xl border border-white/10 px-3 py-2 flex items-center gap-2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Zm6.5 1 4-4"
+                  stroke="rgba(255,255,255,0.65)"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                />
+              </svg>
+              <input
+                className="bg-transparent outline-none text-sm w-72 placeholder:text-white/40"
+                placeholder="Search…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
           </div>
 
           {loading && <div className="px-6 py-10 text-center text-white/60">Loading…</div>}
 
-          {!loading && filtered.length === 0 && (
-            <div className="px-6 py-10 text-center text-white/60">No follow ups yet.</div>
-          )}
+          {!loading && list.length === 0 && <div className="px-6 py-10 text-center text-white/60">No follow ups.</div>}
 
-          {!loading && filtered.length > 0 && (
+          {!loading && list.length > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-[11px] text-white/55">
@@ -275,64 +380,65 @@ export default function FollowUpsPage() {
                     <th className={th}>Name</th>
                     <th className={th}>Phone</th>
                     <th className={th}>Company</th>
+                    <th className={th}>Coverage</th>
                     <th className={th}>Follow Up</th>
-                    <th className={th}>Outcome</th>
                     <th className={thRight}>Actions</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {filtered.map((r) => {
-                    const due = r.follow_up_at ? new Date(r.follow_up_at).getTime() <= Date.now() : false
 
-                    if (due && typeof window !== 'undefined') {
-                      const key = `due_${r.id}`
-                      const already = localStorage.getItem(key)
-                      if (!already) {
-                        localStorage.setItem(key, '1')
-                        pushNotification({
-                          id: r.id,
-                          title: 'Follow Up Due Now',
-                          body: `Call ${r.full_name || 'client'} back`,
-                          href: '/follow-ups',
-                        })
-                        playChime()
-                      }
-                    }
+                <tbody>
+                  {list.map((r) => {
+                    const due = r.follow_up_at ? new Date(r.follow_up_at).getTime() <= Date.now() : false
+                    const completed = isCompleted(r)
 
                     return (
                       <tr key={r.id} className="border-b border-white/10 hover:bg-white/5 transition">
-                        <td className={tdStrong}>{r.full_name || '—'}</td>
+                        <td className={tdStrong}>
+                          <div className="flex items-center gap-2">
+                            <span>{r.full_name || '—'}</span>
+                            {!completed && (
+                              <span
+                                className={[
+                                  'text-[10px] px-2 py-1 rounded-xl border',
+                                  due ? 'bg-red-500/12 border-red-400/25 text-red-200' : 'bg-green-500/12 border-green-400/25 text-green-200',
+                                ].join(' ')}
+                              >
+                                {due ? 'DUE' : 'UPCOMING'}
+                              </span>
+                            )}
+                            {completed && (
+                              <span className="text-[10px] px-2 py-1 rounded-xl border bg-white/8 border-white/10 text-white/70">
+                                DONE
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
                         <td className={td}>{r.phone || '—'}</td>
                         <td className={td}>{r.company || '—'}</td>
+                        <td className={td}>{fmtMoney0(r.coverage)}</td>
+
                         <td className={td}>
-                          <span className={due ? 'text-red-200' : 'text-white/80'}>
-                            {r.follow_up_at ? new Date(r.follow_up_at).toLocaleString() : '—'}
-                          </span>
+                          {r.follow_up_at ? new Date(r.follow_up_at).toLocaleString() : '—'}
+                          {r.notes ? <div className="text-[11px] text-white/50 mt-1">{r.notes}</div> : null}
                         </td>
-                        <td className={td}>
-                          <span className={pill(r.outcome)}>{(r.outcome || 'follow_up').toUpperCase()}</span>
-                        </td>
+
                         <td className={tdRight}>
-                          <div className="flex justify-end gap-2">
-                            <button
-                              onClick={() => goCloseDeal(r.id)}
-                              className="rounded-2xl border border-white/10 bg-green-600/20 hover:bg-green-600/30 transition px-3 py-2 text-xs font-semibold"
-                            >
-                              Closed Deal
-                            </button>
-                            <button
-                              onClick={() => setOutcome(r.id, 'follow_up')}
-                              className="rounded-2xl border border-white/10 bg-yellow-600/20 hover:bg-yellow-600/30 transition px-3 py-2 text-xs font-semibold"
-                            >
-                              Follow Up
-                            </button>
-                            <button
-                              onClick={() => setOutcome(r.id, 'denied_coverage')}
-                              className="rounded-2xl border border-white/10 bg-red-600/20 hover:bg-red-600/30 transition px-3 py-2 text-xs font-semibold"
-                            >
-                              Denied
-                            </button>
-                          </div>
+                          {completed ? (
+                            <span className="text-xs text-white/50">—</span>
+                          ) : (
+                            <div className="flex justify-end gap-2">
+                              <button onClick={() => goCloseDeal(r.id)} className={btnGreen}>
+                                Closed Deal
+                              </button>
+                              <button onClick={() => snooze(r.id, 24)} className={btnYellow}>
+                                Follow Up
+                              </button>
+                              <button onClick={() => setOutcome(r.id, 'denied_coverage')} className={btnRed}>
+                                Denied
+                              </button>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     )
@@ -362,6 +468,11 @@ function Field({ label, children, className }: { label: string; children: React.
   )
 }
 
+function isCompleted(r: FollowUp) {
+  const o = (r.outcome || '').toLowerCase()
+  return o === 'closed_deal' || o === 'denied_coverage'
+}
+
 function toNum(v: any) {
   if (v === null || v === undefined || v === '') return null
   const num = Number(String(v).replace(/[^0-9.]/g, ''))
@@ -374,11 +485,13 @@ function cleanPhone(raw: string) {
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`
 }
 
-function pill(outcome: string | null) {
-  const o = (outcome || 'follow_up').toLowerCase()
-  if (o === 'closed_deal') return 'text-[11px] px-2 py-1 rounded-xl border bg-green-500/12 border-green-400/25 text-green-200'
-  if (o === 'denied_coverage') return 'text-[11px] px-2 py-1 rounded-xl border bg-red-500/12 border-red-400/25 text-red-200'
-  return 'text-[11px] px-2 py-1 rounded-xl border bg-yellow-500/12 border-yellow-400/25 text-yellow-200'
+function fmtMoney0(n: number | null) {
+  if (n === null || n === undefined) return '—'
+  try {
+    return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(n)
+  } catch {
+    return String(n)
+  }
 }
 
 function toISO(d: Date) {
@@ -394,10 +507,28 @@ function toHM(d: Date) {
   return `${h}:${m}`
 }
 
+const CARRIERS = [
+  'Aetna',
+  'Aflac',
+  'AIG',
+  'American Amicable',
+  'Mutual Of Omaha',
+  'Royal Neighbors',
+  'Transamerica',
+] as const
+
 const inputCls =
   'w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-white/20 focus:bg-white/7'
+
 const btnGlass = 'glass px-4 py-2 text-sm font-medium hover:bg-white/10 transition rounded-2xl border border-white/10'
 const btnSoft = 'rounded-xl bg-white/10 hover:bg-white/15 transition px-3 py-2 text-xs'
+
+const btnGreen =
+  'rounded-2xl border border-white/10 bg-green-600/20 hover:bg-green-600/30 transition px-3 py-2 text-xs font-semibold'
+const btnYellow =
+  'rounded-2xl border border-white/10 bg-yellow-600/20 hover:bg-yellow-600/30 transition px-3 py-2 text-xs font-semibold'
+const btnRed =
+  'rounded-2xl border border-white/10 bg-red-600/20 hover:bg-red-600/30 transition px-3 py-2 text-xs font-semibold'
 
 const th = 'text-left px-6 py-3 whitespace-nowrap'
 const thRight = 'text-right px-6 py-3 whitespace-nowrap'
