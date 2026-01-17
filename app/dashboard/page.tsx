@@ -1,6 +1,8 @@
 'use client'
 
 import Sidebar from '../components/Sidebar'
+import FlowLineChart from '../components/FlowLineChart'
+import CarrierDonut from '../components/CarrierDonut'
 
 export default function DashboardPage() {
   return (
@@ -8,7 +10,6 @@ export default function DashboardPage() {
       <Sidebar />
 
       <div className="ml-64">
-        {/* Top bar */}
         <header className="px-10 pt-10 pb-6 flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
@@ -30,19 +31,15 @@ export default function DashboardPage() {
           </div>
         </header>
 
-        {/* Main content */}
         <main className="px-10 pb-12">
-
-          {/* TOP KPI ROW (SWAPPED IN) */}
+          {/* TOP KPI ROW */}
           <section className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
             <MiniStat label="Team Total" value="$0" />
             <MiniStat label="Writing Agents" value="0" />
             <MiniStat label="Top Carrier" value="—" />
           </section>
 
-          {/* SECOND ROW */}
           <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
             {/* FLOW TREND */}
             <div className="lg:col-span-2 glass p-6">
               <div className="flex items-center justify-between mb-4">
@@ -50,11 +47,10 @@ export default function DashboardPage() {
                 <span className="text-xs text-white/60">Last 7 days</span>
               </div>
 
-              <div className="h-56 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-white/50">
-                Stock-style chart (next)
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <FlowLineChart />
               </div>
 
-              {/* KPI MOVED HERE */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
                 <KPI title="Today" value="0" sub="Deals submitted" />
                 <KPI title="This Week" value="0" sub="Deals submitted" />
@@ -62,11 +58,15 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* LEADERBOARD */}
+            {/* LEADERBOARD + DONUT */}
             <div className="glass p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-base font-semibold">Leaderboard</h2>
                 <span className="text-xs text-white/60">This week</span>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 mb-5">
+                <CarrierDonut />
               </div>
 
               <div className="space-y-3">
@@ -98,8 +98,6 @@ export default function DashboardPage() {
     </div>
   )
 }
-
-/* COMPONENTS */
 
 function KPI({ title, value, sub }: { title: string; value: string; sub: string }) {
   return (
