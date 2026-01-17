@@ -1,4 +1,5 @@
-// /app/settings/page.tsx  -> REPLACE ENTIRE FILE WITH THIS
+// FILE: /app/settings/page.tsx
+// ACTION: REPLACE ENTIRE FILE WITH THIS
 
 'use client'
 
@@ -10,12 +11,18 @@ export default function SettingsPage() {
       <Sidebar />
 
       <div className="ml-64 px-10 py-10">
-        <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
-        <p className="text-sm text-white/60 mt-2">Settings baseline loaded successfully.</p>
+        <div className="mb-6">
+          <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
+          <p className="text-sm text-white/60 mt-2">Baseline Settings page (fresh reset).</p>
+        </div>
 
-        <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-6">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
           <div className="text-sm font-semibold mb-2">Status</div>
-          <div className="text-sm text-green-400">✅ Settings page is live and compiling correctly</div>
+          <div className="text-sm text-green-400">✅ Settings route is working</div>
+
+          <div className="mt-4 text-xs text-white/50">
+            If you see this box, /settings is LIVE and we can build tabs next.
+          </div>
         </div>
       </div>
     </div>
