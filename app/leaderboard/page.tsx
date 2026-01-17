@@ -33,7 +33,7 @@ export default function LeaderboardPage() {
       .from('deals')
       .select('id, agent_id, full_name, premium, created_at')
       .order('created_at', { ascending: false })
-      .limit(2000)
+      .limit(5000)
 
     if (!error && data) setRows(data as Row[])
     setLoading(false)
@@ -59,7 +59,9 @@ export default function LeaderboardPage() {
     return Array.from(map.values()).sort((a, b) => b.premium - a.premium)
   }, [rows])
 
-  const top3 = agents.slice(0, 3)
+  const top1 = agents[0]
+  const top2 = agents[1]
+  const top3 = agents[2]
   const rest = agents.slice(3)
 
   return (
@@ -67,19 +69,58 @@ export default function LeaderboardPage() {
       <Sidebar />
 
       <div className="ml-64 px-10 py-10">
-        <div className="mb-8">
-          <h1 className="text-3xl font-semibold tracking-tight">Leaderboard</h1>
-          <p className="text-sm text-white/60 mt-1">Top producers — updated live.</p>
+        <div className="mb-8 flex items-end justify-between">
+          <div>
+            <h1 className="text-3xl font-semibold tracking-tight">Leaderboard</h1>
+            <p className="text-sm text-white/60 mt-1">Top producers — updated live.</p>
+          </div>
+
+          <button
+            onClick={() => window.location.reload()}
+            className="glass px-4 py-2 text-sm font-medium hover:bg-white/10 transition"
+          >
+            Refresh
+          </button>
         </div>
 
-        {/* Top 3 */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-          {[0, 1, 2].map((i) => (
-            <TopCard key={i} rank={i + 1} agent={top3[i]} loading={loading} />
-          ))}
+        {/* Top 3 podium */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-10">
+          {/* #2 */}
+          <div className="lg:col-span-4">
+            <PodiumCard
+              rank={2}
+              label="🥈 Runner Up"
+              agent={top2}
+              loading={loading}
+              accent="silver"
+            />
+          </div>
+
+          {/* #1 */}
+          <div className="lg:col-span-4">
+            <PodiumCard
+              rank={1}
+              label="🏆 CHAMPION"
+              agent={top1}
+              loading={loading}
+              accent="gold"
+              featured
+            />
+          </div>
+
+          {/* #3 */}
+          <div className="lg:col-span-4">
+            <PodiumCard
+              rank={3}
+              label="🥉 Top 3"
+              agent={top3}
+              loading={loading}
+              accent="bronze"
+            />
+          </div>
         </div>
 
-        {/* List */}
+        {/* Full list */}
         <div className="glass rounded-2xl border border-white/10 overflow-hidden">
           <div className="grid grid-cols-5 px-6 py-3 text-xs text-white/60 bg-white/5">
             <div>#</div>
@@ -114,29 +155,101 @@ export default function LeaderboardPage() {
   )
 }
 
-function TopCard({
+function PodiumCard({
   rank,
+  label,
   agent,
   loading,
+  featured,
+  accent,
 }: {
-  rank: number
+  rank: 1 | 2 | 3
+  label: string
   agent?: { name: string; premium: number; deals: number }
   loading: boolean
+  featured?: boolean
+  accent: 'gold' | 'silver' | 'bronze'
 }) {
-  const label =
-    rank === 1 ? '🏆 #1' : rank === 2 ? '🥈 #2' : '🥉 #3'
+  const accentStyles =
+    accent === 'gold'
+      ? 'from-yellow-500/25 via-blue-500/10 to-transparent border-yellow-500/25'
+      : accent === 'silver'
+      ? 'from-white/20 via-blue-500/10 to-transparent border-white/15'
+      : 'from-orange-500/20 via-blue-500/10 to-transparent border-orange-500/20'
+
+  const ring =
+    accent === 'gold'
+      ? 'ring-1 ring-yellow-400/25'
+      : accent === 'silver'
+      ? 'ring-1 ring-white/15'
+      : 'ring-1 ring-orange-400/20'
+
+  const height = featured ? 'min-h-[190px]' : 'min-h-[170px]'
+  const titleSize = featured ? 'text-3xl' : 'text-2xl'
 
   return (
-    <div className="glass p-6 rounded-2xl border border-white/10">
-      <div className="text-sm text-white/60">{label}</div>
-      <div className="mt-3 text-2xl font-semibold">
-        {loading ? 'Loading…' : agent?.name || '—'}
-      </div>
-      <div className="mt-3 flex items-center justify-between text-sm text-white/70">
-        <span>Deals: {loading ? '—' : agent?.deals ?? 0}</span>
-        <span className="font-semibold">
-          {loading ? '—' : `$${money(agent?.premium ?? 0)}`}
-        </span>
+    <div
+      className={[
+        'relative overflow-hidden rounded-2xl border bg-white/5 backdrop-blur-xl',
+        ring,
+        height,
+      ].join(' ')}
+    >
+      {/* glow */}
+      <div
+        className={[
+          'pointer-events-none absolute inset-0 bg-gradient-to-br',
+          accentStyles,
+        ].join(' ')}
+      />
+      {/* subtle shine line */}
+      <div className="pointer-events-none absolute -top-10 left-10 h-40 w-40 rotate-12 rounded-full bg-white/10 blur-2xl" />
+
+      <div className="relative p-6">
+        <div className="flex items-start justify-between">
+          <div>
+            <div className="text-xs text-white/60">{label}</div>
+            <div className={`mt-2 font-semibold tracking-tight ${titleSize}`}>
+              {loading ? 'Loading…' : agent?.name || '—'}
+            </div>
+          </div>
+
+          <div
+            className={[
+              'flex items-center justify-center rounded-2xl px-3 py-2 text-xs font-semibold border',
+              accent === 'gold'
+                ? 'border-yellow-400/25 bg-yellow-500/10'
+                : accent === 'silver'
+                ? 'border-white/15 bg-white/5'
+                : 'border-orange-400/20 bg-orange-500/10',
+            ].join(' ')}
+          >
+            #{rank}
+          </div>
+        </div>
+
+        <div className="mt-5 grid grid-cols-2 gap-3">
+          <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+            <div className="text-[11px] text-white/55">Deals</div>
+            <div className="mt-1 text-lg font-semibold">
+              {loading ? '—' : agent?.deals ?? 0}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+            <div className="text-[11px] text-white/55">Total Premium</div>
+            <div className="mt-1 text-lg font-semibold">
+              {loading ? '—' : `$${money(agent?.premium ?? 0)}`}
+            </div>
+          </div>
+        </div>
+
+        {featured && (
+          <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-white/70">
+            <span className="text-white/50 mr-2">Energy:</span>
+            #1 spot claimed. Keep the pace.
+          </div>
+        )}
       </div>
     </div>
   )
