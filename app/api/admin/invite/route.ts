@@ -1,7 +1,7 @@
-// /app/api/admin/invite/route.ts
+// /app/api/admin/invite/route.ts  -> REPLACE ENTIRE FILE WITH THIS
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { supabaseAdmin } from '../../../../lib/supabaseAdmin'
+import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
 function supabaseAnonWithAuth(req: Request) {
   const auth = req.headers.get('authorization') || ''
