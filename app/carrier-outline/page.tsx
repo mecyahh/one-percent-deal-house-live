@@ -8,7 +8,7 @@ type Carrier = {
   id: string
   name: string
   sort_order: number
-  is_active: boolean
+  active: boolean
 }
 
 type Account = {
@@ -25,16 +25,14 @@ type Account = {
 
 export default function CarrierOutlinePage() {
   const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState<string | null>(null) // carrier_id
+  const [saving, setSaving] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
 
   const [carriers, setCarriers] = useState<Carrier[]>([])
-  const [accounts, setAccounts] = useState<Record<string, Account>>({}) // carrier_id -> account
-
+  const [accounts, setAccounts] = useState<Record<string, Account>>({})
   const [search, setSearch] = useState('')
   const [showPasswords, setShowPasswords] = useState(false)
 
-  // edit state per carrier
   const [draft, setDraft] = useState<
     Record<
       string,
@@ -64,8 +62,8 @@ export default function CarrierOutlinePage() {
 
     const cRes = await supabase
       .from('carriers')
-      .select('id, name, sort_order, is_active')
-      .eq('is_active', true)
+      .select('id, name, sort_order, active')
+      .eq('active', true)
       .order('sort_order', { ascending: true })
       .order('name', { ascending: true })
 
@@ -92,7 +90,6 @@ export default function CarrierOutlinePage() {
     const accMap: Record<string, Account> = {}
     for (const a of accList) accMap[a.carrier_id] = a
 
-    // init drafts
     const d: typeof draft = {}
     for (const c of carrierList) {
       const existing = accMap[c.id]
@@ -138,7 +135,6 @@ export default function CarrierOutlinePage() {
     }
 
     const d = draft[carrierId]
-
     const payload = {
       agent_id: uid,
       carrier_id: carrierId,
@@ -150,7 +146,6 @@ export default function CarrierOutlinePage() {
     }
 
     const existing = accounts[carrierId]
-
     let err: any = null
 
     if (existing?.id) {
@@ -175,7 +170,6 @@ export default function CarrierOutlinePage() {
   async function clearCarrier(carrierId: string) {
     const existing = accounts[carrierId]
     if (!existing?.id) {
-      // just clear draft
       setField(carrierId, 'producer_number', '')
       setField(carrierId, 'username', '')
       setField(carrierId, 'password', '')
@@ -337,8 +331,6 @@ export default function CarrierOutlinePage() {
   )
 }
 
-/* UI bits */
-
 function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
   return (
     <div className={className || ''}>
@@ -358,8 +350,6 @@ function StatusPill({ status }: { status: string }) {
 
   return <span className={`text-[11px] px-2 py-1 rounded-xl border ${cls}`}>{status}</span>
 }
-
-/* styles */
 
 const inputCls =
   'w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-white/20 focus:bg-white/7'
