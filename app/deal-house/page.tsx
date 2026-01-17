@@ -7,22 +7,19 @@ import { supabase } from '@/lib/supabaseClient'
 type Deal = {
   id: string
   created_at: string
-  agent_id: string
   full_name: string | null
   company: string | null
   policy_number: string | null
   coverage: number | null
-  premium: number | null
   dob: string | null
-  beneficiary_name: string | null
-  note: string | null
+  status: string
 }
 
 export default function DealHousePage() {
-  const [loading, setLoading] = useState(true)
-  const [toast, setToast] = useState<string | null>(null)
   const [rows, setRows] = useState<Deal[]>([])
+  const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [editing, setEditing] = useState<Deal | null>(null)
 
   useEffect(() => {
     load()
@@ -30,160 +27,131 @@ export default function DealHousePage() {
 
   async function load() {
     setLoading(true)
-
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('deals')
-      .select('id, created_at, agent_id, full_name, company, policy_number, coverage, premium, dob, beneficiary_name, note')
+      .select('id, created_at, full_name, company, policy_number, coverage, dob, status')
       .order('created_at', { ascending: false })
-      .limit(2000)
-
-    if (error) {
-      setToast('Could not load Deal House (RLS)')
-      setLoading(false)
-      return
-    }
 
     setRows((data || []) as Deal[])
     setLoading(false)
   }
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return rows
+  async function saveEdit() {
+    if (!editing) return
+    await supabase
+      .from('deals')
+      .update({
+        full_name: editing.full_name,
+        company: editing.company,
+        policy_number: editing.policy_number,
+        coverage: editing.coverage,
+        dob: editing.dob,
+        status: editing.status,
+      })
+      .eq('id', editing.id)
 
-    return rows.filter((d) => {
-      const blob = [
-        d.full_name,
-        d.company,
-        d.policy_number,
-        d.beneficiary_name,
-        d.note,
-        d.dob,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-      return blob.includes(q)
-    })
+    setEditing(null)
+    load()
+  }
+
+  const filtered = useMemo(() => {
+    if (!search) return rows
+    return rows.filter((r) =>
+      `${r.full_name} ${r.company} ${r.policy_number}`.toLowerCase().includes(search.toLowerCase())
+    )
   }, [rows, search])
 
   return (
     <div className="min-h-screen bg-[#0b0f1a] text-white">
       <Sidebar />
 
-      {toast && (
-        <div className="fixed top-5 right-5 z-50">
-          <div className="glass px-5 py-4 rounded-2xl border border-white/10 shadow-2xl">
-            <div className="text-sm font-semibold">{toast}</div>
-            <div className="mt-3 flex gap-2">
-              <button className={btnSoft} onClick={() => setToast(null)}>
-                OK
-              </button>
+      <div className="ml-64 px-10 py-10">
+        <div className="flex justify-between items-end mb-8">
+          <div>
+            <h1 className="text-3xl font-semibold">Deal House</h1>
+            <p className="text-sm text-white/60 mt-1">Clean. Editable. Real-time.</p>
+          </div>
+
+          <input
+            placeholder="Search deals…"
+            className="glass px-4 py-2 rounded-xl text-sm outline-none"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+
+        <div className="glass rounded-2xl border border-white/10 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="text-white/50">
+              <tr className="border-b border-white/10">
+                <th className={th}>Name</th>
+                <th className={th}>Company</th>
+                <th className={th}>Policy #</th>
+                <th className={th}>Coverage</th>
+                <th className={th}>DOB</th>
+                <th className={th}>Status</th>
+                <th className={thRight}></th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {filtered.map((d) => (
+                <tr key={d.id} className="border-b border-white/10 hover:bg-white/5">
+                  <td className={tdStrong}>{d.full_name}</td>
+                  <td className={td}>{d.company}</td>
+                  <td className={td}>{d.policy_number}</td>
+                  <td className={td}>{d.coverage ? `$${d.coverage.toLocaleString()}` : '—'}</td>
+                  <td className={td}>{d.dob || '—'}</td>
+                  <td className={td}>{d.status}</td>
+                  <td className={tdRight}>
+                    <button onClick={() => setEditing(d)} className="opacity-60 hover:opacity-100">
+                      ✏️
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {!loading && filtered.length === 0 && (
+            <div className="p-10 text-center text-white/50">No deals yet</div>
+          )}
+        </div>
+      </div>
+
+      {/* EDIT MODAL */}
+      {editing && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="glass rounded-2xl border border-white/10 p-6 w-full max-w-xl">
+            <h2 className="text-lg font-semibold mb-4">Edit Deal</h2>
+
+            <div className="grid grid-cols-2 gap-4">
+              <input className={input} value={editing.full_name || ''} onChange={(e) => setEditing({ ...editing, full_name: e.target.value })} placeholder="Full Name" />
+              <input className={input} value={editing.company || ''} onChange={(e) => setEditing({ ...editing, company: e.target.value })} placeholder="Company" />
+              <input className={input} value={editing.policy_number || ''} onChange={(e) => setEditing({ ...editing, policy_number: e.target.value })} placeholder="Policy #" />
+              <input className={input} type="number" value={editing.coverage || ''} onChange={(e) => setEditing({ ...editing, coverage: Number(e.target.value) })} placeholder="Coverage" />
+              <input className={input} type="date" value={editing.dob || ''} onChange={(e) => setEditing({ ...editing, dob: e.target.value })} />
+              <select className={input} value={editing.status} onChange={(e) => setEditing({ ...editing, status: e.target.value })}>
+                <option value="pending">Pending</option>
+                <option value="active">Active</option>
+                <option value="chargeback">Chargeback</option>
+              </select>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => setEditing(null)} className="px-4 py-2 rounded-xl bg-white/10">Cancel</button>
+              <button onClick={saveEdit} className="px-4 py-2 rounded-xl bg-green-600">Save</button>
             </div>
           </div>
         </div>
       )}
-
-      <div className="ml-64 px-10 py-10">
-        <div className="mb-8 flex items-end justify-between">
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight">Deal House</h1>
-            <p className="text-sm text-white/60 mt-1">Clean view of submitted deals.</p>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="glass rounded-2xl border border-white/10 px-3 py-2 flex items-center gap-2">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Zm6.5 1 4-4"
-                  stroke="rgba(255,255,255,0.65)"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                />
-              </svg>
-              <input
-                className="bg-transparent outline-none text-sm w-72 placeholder:text-white/40"
-                placeholder="Search name, carrier, policy #…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-
-            <button onClick={load} className={btnGlass}>
-              Refresh
-            </button>
-          </div>
-        </div>
-
-        <div className="glass rounded-2xl border border-white/10 overflow-hidden">
-          <div className="px-6 py-4 bg-white/5 flex items-center justify-between">
-            <div className="text-sm font-semibold">All Deals</div>
-            <div className="text-xs text-white/60">{filtered.length.toLocaleString()} records</div>
-          </div>
-
-          {loading && <div className="px-6 py-10 text-center text-white/60">Loading…</div>}
-
-          {!loading && filtered.length === 0 && (
-            <div className="px-6 py-10 text-center text-white/60">No deals yet.</div>
-          )}
-
-          {!loading && filtered.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-[11px] text-white/55">
-                  <tr className="border-b border-white/10">
-                    <th className={th}>Full Name</th>
-                    <th className={th}>Company</th>
-                    <th className={th}>Policy #</th>
-                    <th className={th}>Coverage</th>
-                    <th className={th}>DOB</th>
-                    <th className={th}>Beneficiary</th>
-                    <th className={th}>Note</th>
-                    <th className={thRight}>Submitted</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {filtered.map((d) => (
-                    <tr key={d.id} className="border-b border-white/10 hover:bg-white/5 transition">
-                      <td className={tdStrong}>{d.full_name || '—'}</td>
-                      <td className={td}>{d.company || '—'}</td>
-                      <td className={td}>{d.policy_number || '—'}</td>
-                      <td className={td}>{d.coverage ? `$${fmtMoney(d.coverage)}` : '—'}</td>
-                      <td className={td}>{d.dob ? fmtDate(d.dob) : '—'}</td>
-                      <td className={td}>{d.beneficiary_name || '—'}</td>
-                      <td className={tdClamp}>{d.note || '—'}</td>
-                      <td className={tdRight}>{new Date(d.created_at).toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   )
 }
 
-/* helpers + styles */
-
-function fmtMoney(n: number) {
-  return Number(n).toLocaleString(undefined, { maximumFractionDigits: 0 })
-}
-function fmtDate(iso: string) {
-  // accept date or datetime
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleDateString()
-}
-
-const btnGlass = 'glass px-4 py-2 text-sm font-medium hover:bg-white/10 transition rounded-2xl border border-white/10'
-const btnSoft = 'rounded-xl bg-white/10 hover:bg-white/15 transition px-3 py-2 text-xs'
-
-const th = 'text-left px-6 py-3 whitespace-nowrap'
-const thRight = 'text-right px-6 py-3 whitespace-nowrap'
-const td = 'px-6 py-4 text-white/80 whitespace-nowrap'
-const tdStrong = 'px-6 py-4 font-semibold whitespace-nowrap'
-const tdRight = 'px-6 py-4 text-right text-white/70 whitespace-nowrap'
-const tdClamp = 'px-6 py-4 text-white/75 max-w-[360px] truncate'
+const th = 'px-6 py-3 text-left'
+const thRight = 'px-6 py-3 text-right'
+const td = 'px-6 py-4 text-white/80'
+const tdStrong = 'px-6 py-4 font-semibold'
+const tdRight = 'px-6 py-4 text-right'
+const input = 'w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 outline-none'
