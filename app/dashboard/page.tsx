@@ -1,12 +1,11 @@
-export const dynamic = 'force-dynamic'
-
 'use client'
+
+export const dynamic = 'force-dynamic'
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import Sidebar from '../components/Sidebar'
 import { supabase } from '@/lib/supabaseClient'
-import FlowDatePicker from '@/app/components/FlowDatePicker'
 
 type Profile = {
   id: string
