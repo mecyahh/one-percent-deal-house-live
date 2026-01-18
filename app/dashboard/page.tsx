@@ -236,7 +236,7 @@ export default function DashboardPage() {
 
           {/* TOP KPI CARDS (smaller) */}
           <section className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <MiniStat label="Production" value={loading ? '—' : `$${formatMoney(production)}`} compact />
+            <MiniStat label="Total Production" value={loading ? '—' : `$${formatMoney(production)}`} compact />
             <MiniStat label="Writing Agents" value={loading ? '—' : String(writingAgents)} compact />
             <MiniStat label="Deals Submitted" value={loading ? '—' : String(dealsSubmitted)} compact />
           </section>
