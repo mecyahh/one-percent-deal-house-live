@@ -1,5 +1,5 @@
 // ✅ FILE: /app/settings/page.tsx  (REPLACE ENTIRE FILE)
-// Adds: Admin-only "Agents" tab + Add Agent modal (calls /api/admin/invite)
+// Role-based tabs + Theme propagation + Settings lock + Discord webhook (owner/admin only)
 
 'use client'
 
@@ -12,12 +12,12 @@ type Profile = {
   email: string | null
   first_name: string | null
   last_name: string | null
-  avatar_url: string | null
-  role: string // agent | admin
-  is_agency_owner: boolean
-  comp: number
+  role: string | null
+  is_agency_owner: boolean | null
   upline_id: string | null
   theme: string | null
+  avatar_url: string | null
+  discord_webhook_url?: string | null
 }
 
 const THEMES = [
@@ -31,130 +31,88 @@ const THEMES = [
   { key: 'orange', label: 'Grey / Orange' },
 ] as const
 
-const COMP_VALUES = Array.from({ length: 41 }, (_, i) => i * 5) // 0..200
-
 export default function SettingsPage() {
-  const [me, setMe] = useState<Profile | null>(null)
-  const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState<string | null>(null)
+  const [me, setMe] = useState<Profile | null>(null)
+  const [tab, setTab] = useState<'profile' | 'agency' | 'security'>('profile')
 
-  const [tab, setTab] = useState<'profile' | 'agents'>('profile')
+  // profile
+  const [pFirst, setPFirst] = useState('')
+  const [pLast, setPLast] = useState('')
+  const [pEmail, setPEmail] = useState('')
 
-  // profile edit
-  const [firstName, setFirstName] = useState('')
-  const [lastName, setLastName] = useState('')
-  const [email, setEmail] = useState('')
+  // agency (owner/admin)
+  const [themePick, setThemePick] = useState('blue')
+  const [propagateBusy, setPropagateBusy] = useState(false)
 
-  // agents tab
-  const [agents, setAgents] = useState<Profile[]>([])
-  const [agentsLoading, setAgentsLoading] = useState(false)
-  const [agentSearch, setAgentSearch] = useState('')
-  const [inviteOpen, setInviteOpen] = useState(false)
-
-  const [invite, setInvite] = useState({
-    first_name: '',
-    last_name: '',
-    email: '',
-    upline_id: '',
-    comp: 0,
-    is_agency_owner: false,
-    theme: 'blue',
-    role: 'agent',
-  })
+  // webhook (owner/admin)
+  const [webhookUrl, setWebhookUrl] = useState('')
+  const [webhookBusy, setWebhookBusy] = useState(false)
 
   useEffect(() => {
     boot()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  async function boot() {
-    setLoading(true)
+  const isAdmin = useMemo(() => (me?.role || '').toLowerCase() === 'admin', [me?.role])
+  const isOwner = useMemo(() => !!me?.is_agency_owner, [me?.is_agency_owner])
+  const isOwnerOrAdmin = useMemo(() => isOwner || isAdmin, [isOwner, isAdmin])
 
+  const tabs = useMemo(() => {
+    const base: { key: any; label: string; show: boolean }[] = [
+      { key: 'profile', label: 'Profile', show: true },
+      { key: 'security', label: 'Security', show: true },
+      { key: 'agency', label: 'Agency', show: isOwnerOrAdmin },
+    ]
+    return base.filter((t) => t.show)
+  }, [isOwnerOrAdmin])
+
+  async function boot() {
     const { data: userRes } = await supabase.auth.getUser()
-    const user = userRes.user
-    if (!user) {
+    const uid = userRes.user?.id
+    if (!uid) {
       window.location.href = '/login'
       return
     }
 
-    const { data: prof } = await supabase.from('profiles').select('*').eq('id', user.id).single()
-    if (!prof) {
-      setLoading(false)
-      return
-    }
+    const { data: prof } = await supabase
+      .from('profiles')
+      .select('id,email,first_name,last_name,role,is_agency_owner,upline_id,theme,avatar_url,discord_webhook_url')
+      .eq('id', uid)
+      .single()
+
+    if (!prof) return
 
     const p = prof as Profile
     setMe(p)
 
-    setFirstName(p.first_name || '')
-    setLastName(p.last_name || '')
-    setEmail(p.email || '')
+    setPFirst(p.first_name || '')
+    setPLast(p.last_name || '')
+    setPEmail(p.email || '')
 
-    // Admins default into Agents tab
-    if (p.role === 'admin' || p.is_agency_owner) {
-      setTab('agents')
-      loadAgents()
-    } else {
-      setTab('profile')
-    }
+    setThemePick(p.theme || 'blue')
+    setWebhookUrl((p as any).discord_webhook_url || '')
 
-    setLoading(false)
+    // if agent, keep them on profile
+    setTab((p.is_agency_owner || (p.role || '').toLowerCase() === 'admin') ? 'agency' : 'profile')
   }
 
-  async function loadAgents() {
-    setAgentsLoading(true)
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(5000)
-
-    if (error) setToast('Could not load agents')
-    setAgents((data || []) as Profile[])
-    setAgentsLoading(false)
+  async function authHeader() {
+    const { data } = await supabase.auth.getSession()
+    const token = data.session?.access_token
+    return token ? `Bearer ${token}` : ''
   }
-
-  const filteredAgents = useMemo(() => {
-    const q = agentSearch.trim().toLowerCase()
-    if (!q) return agents
-    return agents.filter((a) => {
-      const blob = [a.first_name, a.last_name, a.email].filter(Boolean).join(' ').toLowerCase()
-      return blob.includes(q)
-    })
-  }, [agents, agentSearch])
-
-  const uplineOptions = useMemo(() => {
-    return agents
-      .slice()
-      .sort((a, b) => {
-        const an = `${a.first_name || ''} ${a.last_name || ''}`.trim().toLowerCase()
-        const bn = `${b.first_name || ''} ${b.last_name || ''}`.trim().toLowerCase()
-        return an.localeCompare(bn)
-      })
-      .map((a) => ({
-        id: a.id,
-        label: `${(a.first_name || '').trim()} ${(a.last_name || '').trim()}${a.email ? ` • ${a.email}` : ''}`.trim(),
-      }))
-  }, [agents])
 
   async function saveProfile() {
     if (!me) return
-
-    const { error } = await supabase
-      .from('profiles')
-      .update({
-        first_name: firstName.trim() || null,
-        last_name: lastName.trim() || null,
-        email: email.trim() || null,
-      })
-      .eq('id', me.id)
-
-    if (error) {
-      setToast('Save failed')
-      return
+    const payload = {
+      first_name: pFirst.trim() || null,
+      last_name: pLast.trim() || null,
+      email: pEmail.trim() || null,
     }
-
-    setToast('Profile updated ✅')
+    const { error } = await supabase.from('profiles').update(payload).eq('id', me.id)
+    if (error) return setToast('Save failed')
+    setToast('Profile saved ✅')
     boot()
   }
 
@@ -163,49 +121,59 @@ export default function SettingsPage() {
     window.location.href = '/login'
   }
 
-  async function inviteAgent() {
+  // Theme: save for me
+  async function saveThemeForMe() {
     if (!me) return
-    if (!(me.role === 'admin' || me.is_agency_owner)) {
-      setToast('Admin only')
-      return
-    }
+    if (!isOwnerOrAdmin) return setToast('Locked: owners/admin only')
 
-    const res = await fetch('/api/admin/invite', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...invite,
-        upline_id: invite.upline_id || null,
-      }),
-    })
+    const { error } = await supabase.from('profiles').update({ theme: themePick }).eq('id', me.id)
+    if (error) return setToast('Theme save failed')
 
-    const json = await res.json()
-    if (!res.ok) {
-      setToast(json.error || 'Invite failed')
-      return
-    }
-
-    setToast('Invite sent ✅')
-    setInviteOpen(false)
-    setInvite({
-      first_name: '',
-      last_name: '',
-      email: '',
-      upline_id: '',
-      comp: 0,
-      is_agency_owner: false,
-      theme: 'blue',
-      role: 'agent',
-    })
-    loadAgents()
+    setToast('Theme saved ✅')
+    boot()
   }
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#0b0f1a] text-white flex items-center justify-center">
-        Loading…
-      </div>
-    )
+  // Theme: propagate to downlines (server)
+  async function propagateThemeToDownlines() {
+    if (!isOwnerOrAdmin) return setToast('Locked: owners/admin only')
+
+    setPropagateBusy(true)
+    try {
+      const token = await authHeader()
+      if (!token) return setToast('Not logged in')
+
+      const res = await fetch('/api/admin/propagate-theme', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: token },
+        body: JSON.stringify({ theme: themePick }),
+      })
+
+      const json = await res.json()
+      if (!res.ok) return setToast(json.error || 'Propagate failed')
+
+      setToast(`Theme pushed ✅ (${json.updated} users)`)
+      boot()
+    } finally {
+      setPropagateBusy(false)
+    }
+  }
+
+  async function saveDiscordWebhook() {
+    if (!me) return
+    if (!isOwnerOrAdmin) return setToast('Locked: owners/admin only')
+
+    setWebhookBusy(true)
+    try {
+      // store in profiles.discord_webhook_url (text)
+      const clean = webhookUrl.trim()
+      const { error } = await supabase.from('profiles').update({ discord_webhook_url: clean || null }).eq('id', me.id)
+      if (error) return setToast('Webhook save failed')
+
+      setToast('Webhook saved ✅')
+      boot()
+    } finally {
+      setWebhookBusy(false)
+    }
   }
 
   return (
@@ -214,65 +182,61 @@ export default function SettingsPage() {
 
       {toast && (
         <div className="fixed top-5 right-5 z-50">
-          <div className="rounded-2xl border border-white/10 bg-white/10 backdrop-blur-xl px-5 py-4 shadow-2xl">
+          <div className="glass px-5 py-4 rounded-2xl border border-white/10 shadow-2xl">
             <div className="text-sm font-semibold">{toast}</div>
-            <button onClick={() => setToast(null)} className="mt-3 text-xs text-white/70 hover:text-white">
-              OK
-            </button>
+            <div className="mt-3 flex gap-2">
+              <button className={btnSoft} onClick={() => setToast(null)}>
+                OK
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      <div className="ml-64 px-10 py-10 max-w-5xl">
-        <div className="flex items-end justify-between mb-8">
+      <div className="ml-64 px-10 py-10">
+        <div className="mb-8 flex items-end justify-between">
           <div>
-            <h1 className="text-3xl font-semibold tracking-tight mb-2">Settings</h1>
-            <p className="text-sm text-white/60">Profile + agent invites.</p>
+            <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
+            <p className="text-sm text-white/60 mt-1">
+              {isOwnerOrAdmin ? 'Owner/Admin controls unlocked.' : 'Agent mode: locked settings.'}
+            </p>
           </div>
 
           <div className="flex gap-2">
-            <button
-              onClick={() => setTab('profile')}
-              className={[
-                'rounded-2xl border px-4 py-2 text-sm font-semibold transition',
-                tab === 'profile' ? 'bg-white/10 border-white/15' : 'bg-white/5 border-white/10 hover:bg-white/10',
-              ].join(' ')}
-            >
-              Profile
-            </button>
-
-            {(me?.role === 'admin' || me?.is_agency_owner) && (
+            {tabs.map((t) => (
               <button
-                onClick={() => {
-                  setTab('agents')
-                  loadAgents()
-                }}
+                key={t.key}
+                onClick={() => setTab(t.key)}
                 className={[
                   'rounded-2xl border px-4 py-2 text-sm font-semibold transition',
-                  tab === 'agents' ? 'bg-white/10 border-white/15' : 'bg-white/5 border-white/10 hover:bg-white/10',
+                  tab === t.key ? 'bg-white/10 border-white/15' : 'bg-white/5 border-white/10 hover:bg-white/10',
                 ].join(' ')}
               >
-                Agents
+                {t.label}
               </button>
-            )}
+            ))}
           </div>
         </div>
 
         {/* PROFILE */}
         {tab === 'profile' && (
-          <>
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-6 mb-6">
-              <h2 className="text-lg font-semibold mb-4">Profile</h2>
+          <div className="glass rounded-2xl border border-white/10 p-6">
+            <div className="text-sm font-semibold mb-4">My Profile</div>
 
-              <Field label="Profile Picture">
-                {me?.avatar_url && (
-                  <img
-                    src={me.avatar_url}
-                    alt="Avatar"
-                    className="h-16 w-16 rounded-full mb-3 object-cover border border-white/10"
-                  />
-                )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field label="First Name">
+                <input className={inputCls} value={pFirst} onChange={(e) => setPFirst(e.target.value)} />
+              </Field>
 
+              <Field label="Last Name">
+                <input className={inputCls} value={pLast} onChange={(e) => setPLast(e.target.value)} />
+              </Field>
+
+              <Field label="Email">
+                <input className={inputCls} value={pEmail} onChange={(e) => setPEmail(e.target.value)} />
+              </Field>
+
+              <Field label="Profile Picture (Upload)">
                 <input
                   type="file"
                   accept="image/*"
@@ -285,270 +249,126 @@ export default function SettingsPage() {
                     const file = e.target.files?.[0]
                     if (!file || !me) return
 
-                    const ext = file.name.split('.').pop() || 'png'
+                    const ext = file.name.split('.').pop()
                     const path = `${me.id}.${ext}`
 
-                    const { error: uploadError } = await supabase.storage
-                      .from('avatars')
-                      .upload(path, file, { upsert: true })
-
-                    if (uploadError) {
-                      setToast('Upload failed')
-                      return
-                    }
+                    const { error: uploadError } = await supabase.storage.from('avatars').upload(path, file, { upsert: true })
+                    if (uploadError) return setToast('Upload failed')
 
                     const { data } = supabase.storage.from('avatars').getPublicUrl(path)
 
                     await supabase.from('profiles').update({ avatar_url: data.publicUrl }).eq('id', me.id)
-
                     setToast('Profile picture updated ✅')
                     boot()
                   }}
                 />
               </Field>
+            </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-                <Field label="First Name">
-                  <input className={inputCls} value={firstName} onChange={(e) => setFirstName(e.target.value)} />
-                </Field>
-
-                <Field label="Last Name">
-                  <input className={inputCls} value={lastName} onChange={(e) => setLastName(e.target.value)} />
-                </Field>
-
-                <Field label="Email">
-                  <input className={inputCls} value={email} onChange={(e) => setEmail(e.target.value)} />
-                </Field>
-
-                <Field label="Role">
-                  <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm">
-                    {me?.is_agency_owner ? 'Agency Owner ✅' : me?.role === 'admin' ? 'Admin ✅' : 'Agent'}
-                  </div>
-                </Field>
-              </div>
-
+            <div className="flex gap-3 mt-5">
               <button onClick={saveProfile} className={saveBtn}>
                 Save Profile
               </button>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-              <h2 className="text-lg font-semibold mb-4">Account</h2>
-              <button onClick={logout} className={logoutBtn}>
+              <button onClick={logout} className={dangerBtn}>
                 Log Out
               </button>
             </div>
-          </>
+          </div>
         )}
 
-        {/* AGENTS */}
-        {tab === 'agents' && (me?.role === 'admin' || me?.is_agency_owner) && (
+        {/* AGENCY (OWNER/ADMIN ONLY) */}
+        {tab === 'agency' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <div className="text-sm font-semibold">Agents</div>
-                  <div className="text-xs text-white/55 mt-1">Invite agents (unique login) + store comp/upline/theme.</div>
-                </div>
-
-                <button onClick={() => setInviteOpen(true)} className={saveBtnSmall}>
-                  Add Agent
-                </button>
+            {/* THEMES */}
+            <div className="glass rounded-2xl border border-white/10 p-6">
+              <div className="text-sm font-semibold">Themes</div>
+              <div className="text-xs text-white/55 mt-1">
+                Set your theme, then optionally push it to all downlines (propagation).
               </div>
 
-              <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 mb-4">
-                <input
-                  className="bg-transparent outline-none text-sm w-full placeholder:text-white/40"
-                  placeholder="Search agents…"
-                  value={agentSearch}
-                  onChange={(e) => setAgentSearch(e.target.value)}
-                />
-              </div>
+              <div className="mt-5 grid grid-cols-1 gap-4">
+                <Field label="Select Theme">
+                  <select className={inputCls} value={themePick} onChange={(e) => setThemePick(e.target.value)}>
+                    {THEMES.map((t) => (
+                      <option key={t.key} value={t.key}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
 
-              <div className="rounded-2xl border border-white/10 overflow-hidden">
-                <div className="px-4 py-3 bg-white/5 flex items-center justify-between">
-                  <div className="text-xs font-semibold">Directory</div>
-                  <button onClick={loadAgents} className={btnSoft}>
-                    Refresh
+                <div className="flex gap-3">
+                  <button onClick={saveThemeForMe} className={saveBtn}>
+                    Save Theme
+                  </button>
+
+                  <button
+                    onClick={propagateThemeToDownlines}
+                    disabled={propagateBusy}
+                    className={[
+                      'rounded-2xl border border-white/10 bg-fuchsia-600/70 hover:bg-fuchsia-600 transition px-5 py-3 text-sm font-semibold',
+                      propagateBusy ? 'opacity-60 cursor-not-allowed' : '',
+                    ].join(' ')}
+                  >
+                    Push Theme to Downlines
                   </button>
                 </div>
-
-                {agentsLoading && <div className="px-4 py-6 text-sm text-white/60">Loading…</div>}
-
-                {!agentsLoading && (
-                  <div className="max-h-[520px] overflow-auto">
-                    {filteredAgents.map((a) => (
-                      <div key={a.id} className="px-4 py-3 border-t border-white/10 flex items-center justify-between">
-                        <div>
-                          <div className="text-sm font-semibold">
-                            {(a.first_name || '—')} {(a.last_name || '')}
-                            {a.is_agency_owner ? (
-                              <span className="ml-2 text-[10px] px-2 py-1 rounded-xl border bg-white/5 border-white/10 text-white/70">
-                                Owner
-                              </span>
-                            ) : null}
-                            {a.role === 'admin' ? (
-                              <span className="ml-2 text-[10px] px-2 py-1 rounded-xl border bg-white/5 border-white/10 text-white/70">
-                                Admin
-                              </span>
-                            ) : null}
-                          </div>
-                          <div className="text-xs text-white/55 mt-1">{a.email || '—'}</div>
-                        </div>
-
-                        <div className="text-xs text-white/65 flex gap-2">
-                          <span className="px-2 py-1 rounded-xl border border-white/10 bg-white/5">
-                            Comp {Number(a.comp || 0)}%
-                          </span>
-                          <span className="px-2 py-1 rounded-xl border border-white/10 bg-white/5">
-                            Theme {(a.theme || 'blue').toUpperCase()}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-
-                    {filteredAgents.length === 0 && (
-                      <div className="px-4 py-6 text-sm text-white/60">No agents.</div>
-                    )}
-                  </div>
-                )}
               </div>
             </div>
 
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-              <div className="text-sm font-semibold mb-2">How it works</div>
-              <div className="text-xs text-white/55 leading-relaxed">
-                “Add Agent” sends an invite email from Supabase. The agent sets their password and logs into Flow. Their
-                profile row is created/updated with comp, theme, and upline so it sticks permanently.
+            {/* DISCORD WEBHOOK */}
+            <div className="glass rounded-2xl border border-white/10 p-6">
+              <div className="text-sm font-semibold">Discord Webhook</div>
+              <div className="text-xs text-white/55 mt-1">
+                When agents post deals, we send a message to this webhook. Downlines inherit webhook from their upline chain.
+              </div>
+
+              <div className="mt-5">
+                <Field label="Webhook URL">
+                  <input
+                    className={inputCls}
+                    value={webhookUrl}
+                    onChange={(e) => setWebhookUrl(e.target.value)}
+                    placeholder="https://discord.com/api/webhooks/..."
+                  />
+                </Field>
+
+                <button
+                  onClick={saveDiscordWebhook}
+                  disabled={webhookBusy}
+                  className={[saveBtn, webhookBusy ? 'opacity-60 cursor-not-allowed' : ''].join(' ')}
+                >
+                  Save Webhook
+                </button>
+
+                <div className="text-[11px] text-white/50 mt-3">
+                  Tip: agents never see this URL (stored in Supabase only).
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* SECURITY (LOCK EXPLAINER) */}
+        {tab === 'security' && (
+          <div className="glass rounded-2xl border border-white/10 p-6">
+            <div className="text-sm font-semibold">Locked Settings</div>
+            <div className="text-xs text-white/55 mt-1">
+              Agents can’t change agency-wide settings (themes/webhooks). Only Owners/Admins can.
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
+              <div className="font-semibold">Your access level</div>
+              <div className="mt-2">
+                {isOwner ? 'Agency Owner ✅' : isAdmin ? 'Admin ✅' : 'Agent'}
               </div>
             </div>
           </div>
         )}
       </div>
-
-      {/* INVITE MODAL */}
-      {inviteOpen && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-6">
-          <div className="rounded-2xl border border-white/10 bg-white/10 backdrop-blur-xl p-6 w-full max-w-3xl shadow-2xl">
-            <div className="flex items-start justify-between gap-4 mb-5">
-              <div>
-                <div className="text-lg font-semibold">Add Agent</div>
-                <div className="text-xs text-white/55 mt-1">Invite to their own login (email).</div>
-              </div>
-
-              <button onClick={() => setInviteOpen(false)} className={closeBtn}>
-                Close
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field label="First Name">
-                <input
-                  className={inputCls}
-                  value={invite.first_name}
-                  onChange={(e) => setInvite((p) => ({ ...p, first_name: e.target.value }))}
-                />
-              </Field>
-
-              <Field label="Last Name">
-                <input
-                  className={inputCls}
-                  value={invite.last_name}
-                  onChange={(e) => setInvite((p) => ({ ...p, last_name: e.target.value }))}
-                />
-              </Field>
-
-              <Field label="Email">
-                <input
-                  className={inputCls}
-                  value={invite.email}
-                  onChange={(e) => setInvite((p) => ({ ...p, email: e.target.value }))}
-                />
-              </Field>
-
-              <Field label="Upline (live agents)">
-                <select
-                  className={inputCls}
-                  value={invite.upline_id}
-                  onChange={(e) => setInvite((p) => ({ ...p, upline_id: e.target.value }))}
-                >
-                  <option value="">Select…</option>
-                  {uplineOptions.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-
-              <Field label="Comp %">
-                <select
-                  className={inputCls}
-                  value={invite.comp}
-                  onChange={(e) => setInvite((p) => ({ ...p, comp: Number(e.target.value) }))}
-                >
-                  {COMP_VALUES.map((v) => (
-                    <option key={v} value={v}>
-                      {v}%
-                    </option>
-                  ))}
-                </select>
-              </Field>
-
-              <Field label="Role">
-                <select
-                  className={inputCls}
-                  value={invite.role}
-                  onChange={(e) => setInvite((p) => ({ ...p, role: e.target.value }))}
-                >
-                  <option value="agent">Agent</option>
-                  <option value="admin">Admin</option>
-                </select>
-              </Field>
-
-              <Field label="Agency Owner">
-                <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                  <input
-                    type="checkbox"
-                    checked={invite.is_agency_owner}
-                    onChange={(e) => setInvite((p) => ({ ...p, is_agency_owner: e.target.checked }))}
-                    className="h-5 w-5"
-                  />
-                  <div className="text-sm">Mark as Agency Owner</div>
-                </div>
-              </Field>
-
-              <Field label="Theme">
-                <select
-                  className={inputCls}
-                  value={invite.theme}
-                  onChange={(e) => setInvite((p) => ({ ...p, theme: e.target.value }))}
-                >
-                  {THEMES.map((t) => (
-                    <option key={t.key} value={t.key}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </div>
-
-            <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => setInviteOpen(false)} className={closeBtn}>
-                Cancel
-              </button>
-              <button onClick={inviteAgent} className={saveBtnSmall}>
-                Invite
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
-
-/* ---------- UI Helpers ---------- */
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -560,18 +380,12 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 const inputCls =
-  'w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-white/20 focus:bg-white/10'
+  'w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-white/20 focus:bg-white/7'
 
 const btnSoft = 'rounded-xl bg-white/10 hover:bg-white/15 transition px-3 py-2 text-xs'
 
-const closeBtn =
-  'rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-4 py-3 text-sm font-semibold'
-
 const saveBtn =
-  'mt-6 rounded-2xl bg-green-600 hover:bg-green-500 transition px-5 py-3 text-sm font-semibold'
+  'mt-4 rounded-2xl bg-green-600 hover:bg-green-500 transition px-5 py-3 text-sm font-semibold'
 
-const saveBtnSmall =
-  'rounded-2xl bg-green-600 hover:bg-green-500 transition px-5 py-3 text-sm font-semibold'
-
-const logoutBtn =
-  'rounded-2xl bg-red-600/80 hover:bg-red-600 transition px-5 py-3 text-sm font-semibold'
+const dangerBtn =
+  'mt-4 rounded-2xl bg-red-600 hover:bg-red-500 transition px-5 py-3 text-sm font-semibold'
