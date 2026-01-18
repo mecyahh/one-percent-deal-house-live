@@ -283,17 +283,44 @@ export default function SettingsPage() {
                 <input className={inputCls} value={pEmail} onChange={(e) => setPEmail(e.target.value)} />
               </Field>
 
-              <Field label="Profile Picture (Upload)">
-                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0]
-                      if (f) uploadAvatar(f)
-                    }}
-                    className="text-sm"
-                  />
+             {/* Profile Picture Upload */}
+<Field label="Profile Picture">
+  <input
+    type="file"
+    accept="image/*"
+    className="block w-full text-sm text-white/70
+      file:mr-4 file:rounded-xl file:border-0
+      file:bg-white/10 file:px-4 file:py-2
+      file:text-sm file:font-semibold
+      hover:file:bg-white/20 transition"
+    onChange={async (e) => {
+      const file = e.target.files?.[0]
+      if (!file || !me) return
+
+      const ext = file.name.split('.').pop()
+      const path = `${me.id}.${ext}`
+
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(path, file, { upsert: true })
+
+      if (uploadError) {
+        setToast('Upload failed')
+        return
+      }
+
+      const { data } = supabase.storage.from('avatars').getPublicUrl(path)
+
+      await supabase
+        .from('profiles')
+        .update({ avatar_url: data.publicUrl })
+        .eq('id', me.id)
+
+      setToast('Profile picture updated ✅')
+      boot()
+    }}
+  />
+</Field>
                   <div className="text-[11px] text-white/55 mt-2">Uploads to Supabase Storage bucket: <b>avatars</b></div>
                 </div>
               </Field>
