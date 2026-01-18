@@ -1,6 +1,7 @@
+// /app/settings/page.tsx
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Sidebar from '../components/Sidebar'
 import { supabase } from '@/lib/supabaseClient'
 
@@ -11,22 +12,48 @@ type Profile = {
   last_name: string | null
   role: string | null
   is_agency_owner: boolean | null
-  avatar_url: string | null
+  theme?: string | null
+  comp?: number | null
+  avatar_url?: string | null
 }
 
+const THEMES = [
+  { key: 'blue', label: 'Blue' },
+  { key: 'gold', label: 'Gold' },
+  { key: 'green', label: 'Green' },
+  { key: 'red', label: 'Red' },
+  { key: 'mono', label: 'Mono' },
+] as const
+
+const COMP_VALUES = Array.from({ length: 21 }, (_, i) => i * 5) // 0..100
+
 export default function SettingsPage() {
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [toast, setToast] = useState<string | null>(null)
+  const [tab, setTab] = useState<'profile' | 'agents'>('profile')
 
   const [me, setMe] = useState<Profile | null>(null)
 
-  const [first, setFirst] = useState('')
-  const [last, setLast] = useState('')
-  const [email, setEmail] = useState('')
-  const [avatarUrl, setAvatarUrl] = useState<string>('')
+  // profile fields
+  const [pFirst, setPFirst] = useState('')
+  const [pLast, setPLast] = useState('')
+  const [pEmail, setPEmail] = useState('')
+  const [pAvatarUrl, setPAvatarUrl] = useState<string>('')
 
-  const [uploading, setUploading] = useState(false)
-  const fileRef = useRef<HTMLInputElement | null>(null)
+  // agents
+  const [agents, setAgents] = useState<Profile[]>([])
+  const [loadingAgents, setLoadingAgents] = useState(false)
+  const [search, setSearch] = useState('')
+
+  const [invite, setInvite] = useState({
+    first_name: '',
+    last_name: '',
+    email: '',
+    role: 'agent' as 'agent' | 'admin',
+    is_agency_owner: false,
+    upline_id: '',
+    comp: 70,
+    theme: 'blue',
+  })
 
   useEffect(() => {
     boot()
@@ -34,42 +61,82 @@ export default function SettingsPage() {
   }, [])
 
   async function boot() {
-    try {
-      setStatus('loading')
+    const { data: userRes } = await supabase.auth.getUser()
+    const uid = userRes.user?.id
+    if (!uid) {
+      window.location.href = '/login'
+      return
+    }
 
-      const { data: userRes, error: userErr } = await supabase.auth.getUser()
-      if (userErr) throw new Error(userErr.message)
-      const user = userRes.user
-      if (!user) {
-        window.location.href = '/login'
-        return
-      }
+    const { data: prof, error } = await supabase.from('profiles').select('*').eq('id', uid).single()
+    if (error || !prof) {
+      setToast('Profile missing (profiles table)')
+      return
+    }
 
-      const { data: prof, error: pErr } = await supabase.from('profiles').select('*').eq('id', user.id).single()
-      if (pErr) throw new Error(pErr.message)
+    const p = prof as Profile
+    setMe(p)
+    setPFirst(p.first_name || '')
+    setPLast(p.last_name || '')
+    setPEmail(p.email || '')
+    setPAvatarUrl(p.avatar_url || '')
 
-      const p = prof as Profile
-      setMe(p)
-
-      setFirst(p.first_name || '')
-      setLast(p.last_name || '')
-      setEmail(p.email || user.email || '')
-      setAvatarUrl(p.avatar_url || '')
-
-      setStatus('ready')
-    } catch (e: any) {
-      setStatus('error')
-      setToast(e?.message || 'Settings failed to load')
+    if (isOwnerOrAdmin(p)) {
+      setTab('agents')
+      loadAgents()
+    } else {
+      setTab('profile')
     }
   }
+
+  function isOwnerOrAdmin(p: Profile | null) {
+    if (!p) return false
+    return p.role === 'admin' || p.is_agency_owner === true
+  }
+
+  async function loadAgents() {
+    setLoadingAgents(true)
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id,email,first_name,last_name,role,is_agency_owner,theme,comp,avatar_url')
+      .order('created_at', { ascending: false })
+      .limit(5000)
+
+    if (error) setToast('Could not load agents')
+    setAgents((data || []) as Profile[])
+    setLoadingAgents(false)
+  }
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return agents
+    return agents.filter((a) => {
+      const b = [a.first_name, a.last_name, a.email].filter(Boolean).join(' ').toLowerCase()
+      return b.includes(q)
+    })
+  }, [agents, search])
+
+  const uplineOptions = useMemo(() => {
+    return agents
+      .slice()
+      .sort((a, b) => {
+        const an = `${a.first_name || ''} ${a.last_name || ''}`.trim().toLowerCase()
+        const bn = `${b.first_name || ''} ${b.last_name || ''}`.trim().toLowerCase()
+        return an.localeCompare(bn)
+      })
+      .map((a) => ({
+        id: a.id,
+        label: `${(a.first_name || '').trim()} ${(a.last_name || '').trim()}${a.email ? ` • ${a.email}` : ''}`.trim(),
+      }))
+  }, [agents])
 
   async function saveProfile() {
     if (!me) return
     const payload = {
-      first_name: first.trim() || null,
-      last_name: last.trim() || null,
-      email: email.trim() || null,
-      avatar_url: avatarUrl.trim() || null,
+      first_name: pFirst.trim() || null,
+      last_name: pLast.trim() || null,
+      email: pEmail.trim() || null,
+      avatar_url: pAvatarUrl || null,
     }
     const { error } = await supabase.from('profiles').update(payload).eq('id', me.id)
     if (error) return setToast('Save failed')
@@ -78,51 +145,80 @@ export default function SettingsPage() {
   }
 
   async function uploadAvatar(file: File) {
-    setUploading(true)
+    if (!me) return
     try {
-      const { data: userRes } = await supabase.auth.getUser()
-      const user = userRes.user
-      if (!user) {
-        window.location.href = '/login'
-        return
-      }
-
-      const ext = (file.name.split('.').pop() || 'png').toLowerCase()
-      const path = `${user.id}/${Date.now()}.${ext}`
+      const ext = file.name.split('.').pop() || 'png'
+      const path = `avatars/${me.id}.${ext}`
 
       const { error: upErr } = await supabase.storage.from('avatars').upload(path, file, {
-        cacheControl: '3600',
         upsert: true,
-        contentType: file.type || 'image/png',
+        contentType: file.type,
       })
       if (upErr) throw new Error(upErr.message)
 
-      const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path)
-      const url = pub.publicUrl
+      const { data } = supabase.storage.from('avatars').getPublicUrl(path)
+      const publicUrl = data.publicUrl
 
-      setAvatarUrl(url)
+      setPAvatarUrl(publicUrl)
 
-      const { error: pErr } = await supabase.from('profiles').update({ avatar_url: url }).eq('id', user.id)
-      if (pErr) throw new Error(pErr.message)
+      const { error: profErr } = await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', me.id)
+      if (profErr) throw new Error(profErr.message)
 
       setToast('Profile picture updated ✅')
       boot()
     } catch (e: any) {
-      setToast(e?.message || 'Upload failed')
-    } finally {
-      setUploading(false)
+      setToast(e?.message || 'Upload failed (create Storage bucket: avatars)')
     }
+  }
+
+  async function authHeader() {
+    const { data } = await supabase.auth.getSession()
+    const token = data.session?.access_token
+    return token ? `Bearer ${token}` : ''
+  }
+
+  async function inviteAgent() {
+    const token = await authHeader()
+    if (!token) return setToast('Not logged in')
+
+    const body = {
+      email: invite.email,
+      first_name: invite.first_name,
+      last_name: invite.last_name,
+      role: invite.role,
+      is_agency_owner: invite.is_agency_owner,
+      upline_id: invite.upline_id || null,
+      comp: invite.comp,
+      theme: invite.theme,
+    }
+
+    const res = await fetch('/api/admin/invite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: token },
+      body: JSON.stringify(body),
+    })
+
+    const json = await res.json()
+    if (!res.ok) return setToast(json.error || 'Invite failed')
+
+    setToast('Invite sent ✅')
+    setInvite({
+      first_name: '',
+      last_name: '',
+      email: '',
+      role: 'agent',
+      is_agency_owner: false,
+      upline_id: '',
+      comp: 70,
+      theme: 'blue',
+    })
+    loadAgents()
   }
 
   async function logout() {
     await supabase.auth.signOut()
     window.location.href = '/login'
   }
-
-  const displayName = useMemo(() => {
-    const a = `${first || ''} ${last || ''}`.trim()
-    return a || 'Account'
-  }, [first, last])
 
   return (
     <div className="min-h-screen bg-[#0b0f1a] text-white">
@@ -145,92 +241,201 @@ export default function SettingsPage() {
         <div className="mb-8 flex items-end justify-between">
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
-            <p className="text-sm text-white/60 mt-1">Quick profile edits + logout.</p>
+            <p className="text-sm text-white/60 mt-1">Profile + Internal agent invites.</p>
           </div>
 
-          <button onClick={logout} className={dangerBtn}>
-            Log out
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setTab('profile')}
+              className={[tabBtn, tab === 'profile' ? tabOn : tabOff].join(' ')}
+            >
+              Profile
+            </button>
+
+            {isOwnerOrAdmin(me) && (
+              <button
+                onClick={() => setTab('agents')}
+                className={[tabBtn, tab === 'agents' ? tabOn : tabOff].join(' ')}
+              >
+                Agents
+              </button>
+            )}
+
+            <button onClick={logout} className={logoutBtn}>
+              Log Out
+            </button>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Profile card */}
-          <div className="lg:col-span-2 glass rounded-2xl border border-white/10 p-6">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <div className="text-sm text-white/60">Profile</div>
-                <div className="text-xl font-semibold mt-1">{displayName}</div>
-                <div className="text-xs text-white/45 mt-1">{me?.email || email || '—'}</div>
-              </div>
+        {/* PROFILE */}
+        {tab === 'profile' && (
+          <div className="glass rounded-2xl border border-white/10 p-6">
+            <div className="text-sm font-semibold mb-4">My Profile</div>
 
-              <div className="flex items-center gap-3">
-                <div className="h-14 w-14 rounded-2xl border border-white/10 bg-white/5 overflow-hidden flex items-center justify-center">
-                  {avatarUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={avatarUrl} alt="avatar" className="h-full w-full object-cover" />
-                  ) : (
-                    <span className="text-white/50 text-xs">No pic</span>
-                  )}
-                </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field label="First Name">
+                <input className={inputCls} value={pFirst} onChange={(e) => setPFirst(e.target.value)} />
+              </Field>
+              <Field label="Last Name">
+                <input className={inputCls} value={pLast} onChange={(e) => setPLast(e.target.value)} />
+              </Field>
+              <Field label="Email">
+                <input className={inputCls} value={pEmail} onChange={(e) => setPEmail(e.target.value)} />
+              </Field>
 
-                <div className="flex flex-col gap-2">
+              <Field label="Profile Picture (Upload)">
+                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
                   <input
-                    ref={fileRef}
                     type="file"
                     accept="image/*"
-                    className="hidden"
                     onChange={(e) => {
                       const f = e.target.files?.[0]
                       if (f) uploadAvatar(f)
-                      if (fileRef.current) fileRef.current.value = ''
                     }}
+                    className="text-sm"
                   />
-                  <button
-                    onClick={() => fileRef.current?.click()}
-                    className={btnGlass}
-                    disabled={uploading}
-                  >
-                    {uploading ? 'Uploading…' : 'Upload picture'}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field label="First Name">
-                <input className={inputCls} value={first} onChange={(e) => setFirst(e.target.value)} />
-              </Field>
-              <Field label="Last Name">
-                <input className={inputCls} value={last} onChange={(e) => setLast(e.target.value)} />
-              </Field>
-              <Field label="Email">
-                <input className={inputCls} value={email} onChange={(e) => setEmail(e.target.value)} />
-              </Field>
-              <Field label="Role">
-                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm">
-                  {me?.is_agency_owner ? 'Agency Owner' : (me?.role || 'Agent')}
+                  <div className="text-[11px] text-white/55 mt-2">Uploads to Supabase Storage bucket: <b>avatars</b></div>
                 </div>
               </Field>
             </div>
 
-            <button onClick={saveProfile} className={saveWide} disabled={status !== 'ready'}>
-              Save
+            <button onClick={saveProfile} className={saveWide}>
+              Save Profile
             </button>
+          </div>
+        )}
 
-            <div className="mt-4 text-xs text-white/45">
-              <span className="text-white/60">Heads up:</span> profile picture uploads require a Supabase Storage bucket named <b>avatars</b>.
+        {/* AGENTS */}
+        {tab === 'agents' && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="glass rounded-2xl border border-white/10 p-6">
+              <div className="text-sm font-semibold mb-4">Add Agent (Invite Email)</div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Field label="First Name">
+                  <input className={inputCls} value={invite.first_name} onChange={(e) => setInvite((p) => ({ ...p, first_name: e.target.value }))} />
+                </Field>
+
+                <Field label="Last Name">
+                  <input className={inputCls} value={invite.last_name} onChange={(e) => setInvite((p) => ({ ...p, last_name: e.target.value }))} />
+                </Field>
+
+                <Field label="Email">
+                  <input className={inputCls} value={invite.email} onChange={(e) => setInvite((p) => ({ ...p, email: e.target.value }))} />
+                </Field>
+
+                <Field label="Upline (optional)">
+                  <select className={inputCls} value={invite.upline_id} onChange={(e) => setInvite((p) => ({ ...p, upline_id: e.target.value }))}>
+                    <option value="">Select…</option>
+                    {uplineOptions.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+
+                <Field label="Comp %">
+                  <select className={inputCls} value={invite.comp} onChange={(e) => setInvite((p) => ({ ...p, comp: Number(e.target.value) }))}>
+                    {COMP_VALUES.map((v) => (
+                      <option key={v} value={v}>
+                        {v}%
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+
+                <Field label="Theme">
+                  <select className={inputCls} value={invite.theme} onChange={(e) => setInvite((p) => ({ ...p, theme: e.target.value }))}>
+                    {THEMES.map((t) => (
+                      <option key={t.key} value={t.key}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+
+                <Field label="Role">
+                  <select className={inputCls} value={invite.role} onChange={(e) => setInvite((p) => ({ ...p, role: e.target.value as any }))}>
+                    <option value="agent">Agent</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </Field>
+
+                <Field label="Agency Owner">
+                  <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={invite.is_agency_owner}
+                      onChange={(e) => setInvite((p) => ({ ...p, is_agency_owner: e.target.checked }))}
+                      className="h-5 w-5"
+                    />
+                    <div className="text-sm">Mark as Owner</div>
+                  </div>
+                </Field>
+              </div>
+
+              <button onClick={inviteAgent} className={saveWide}>
+                Send Invite
+              </button>
+            </div>
+
+            <div className="glass rounded-2xl border border-white/10 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <div className="text-sm font-semibold">Agents</div>
+                  <div className="text-xs text-white/55 mt-1">Everyone in your agency.</div>
+                </div>
+                <button onClick={loadAgents} className={btnSoft}>
+                  Refresh
+                </button>
+              </div>
+
+              <div className="glass rounded-2xl border border-white/10 px-3 py-2 flex items-center gap-2 mb-4">
+                <input
+                  className="bg-transparent outline-none text-sm w-full placeholder:text-white/40"
+                  placeholder="Search agents…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
+
+              {loadingAgents && <div className="text-sm text-white/60">Loading…</div>}
+
+              {!loadingAgents && (
+                <div className="rounded-2xl border border-white/10 overflow-hidden max-h-[520px] overflow-auto">
+                  {filtered.map((a) => (
+                    <div key={a.id} className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
+                      <div>
+                        <div className="text-sm font-semibold">
+                          {(a.first_name || '—')} {(a.last_name || '')}
+                          {a.is_agency_owner ? (
+                            <span className="ml-2 text-[10px] px-2 py-1 rounded-xl border bg-white/5 border-white/10 text-white/70">
+                              Owner
+                            </span>
+                          ) : null}
+                          {a.role === 'admin' ? (
+                            <span className="ml-2 text-[10px] px-2 py-1 rounded-xl border bg-white/5 border-white/10 text-white/70">
+                              Admin
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="text-xs text-white/55 mt-1">{a.email || '—'}</div>
+                      </div>
+
+                      <div className="text-xs text-white/65">
+                        <span className="px-2 py-1 rounded-xl border border-white/10 bg-white/5">
+                          Comp {Number(a.comp || 0)}%
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                  {filtered.length === 0 && <div className="px-4 py-6 text-sm text-white/60">No agents.</div>}
+                </div>
+              )}
             </div>
           </div>
-
-          {/* Short ops card */}
-          <div className="glass rounded-2xl border border-white/10 p-6">
-            <div className="text-sm font-semibold">System</div>
-            <div className="text-xs text-white/55 mt-2">
-              • All agents see full leaderboard (agency-wide).<br />
-              • Dashboard shows agent-only data unless owner.<br />
-            </div>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   )
@@ -250,11 +455,12 @@ const inputCls =
 
 const btnSoft = 'rounded-xl bg-white/10 hover:bg-white/15 transition px-3 py-2 text-xs'
 
-const btnGlass =
-  'rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-4 py-2 text-sm font-semibold disabled:opacity-60'
-
 const saveWide =
-  'mt-5 w-full rounded-2xl bg-green-600 hover:bg-green-500 transition px-4 py-3 text-sm font-semibold disabled:opacity-60'
+  'mt-5 w-full rounded-2xl bg-green-600 hover:bg-green-500 transition px-4 py-3 text-sm font-semibold'
 
-const dangerBtn =
-  'rounded-2xl border border-red-400/25 bg-red-500/10 hover:bg-red-500/15 transition px-4 py-2 text-sm font-semibold'
+const tabBtn = 'rounded-2xl border px-4 py-2 text-sm font-semibold transition'
+const tabOn = 'bg-white/10 border-white/15'
+const tabOff = 'bg-white/5 border-white/10 hover:bg-white/10'
+
+const logoutBtn =
+  'rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-4 py-2 text-sm font-semibold'
