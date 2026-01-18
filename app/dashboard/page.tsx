@@ -2,13 +2,12 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
 import Sidebar from '../components/Sidebar'
 import FlowLineChart from '../components/FlowLineChart'
 import CarrierDonut from '../components/CarrierDonut'
 import GoalDonuts from '../components/GoalDonuts'
-import { supabase } from '@/lib/supabaseClient'
 import FlowDatePicker from '@/app/components/FlowDatePicker'
+import { supabase } from '@/lib/supabaseClient'
 
 type DealRow = {
   id: string
@@ -18,26 +17,21 @@ type DealRow = {
   company: string | null
 }
 
-type ProfileRow = {
+type Profile = {
   id: string
   first_name: string | null
   last_name: string | null
-  email: string | null
+  role: string | null
+  is_agency_owner: boolean | null
 }
 
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [deals, setDeals] = useState<DealRow[]>([])
-  const [meName, setMeName] = useState<string>('Agent')
+  const [me, setMe] = useState<Profile | null>(null)
 
-  // date picker for top stats
-  const [dayPick, setDayPick] = useState<string>(() => {
-    const n = new Date()
-    const y = n.getFullYear()
-    const m = String(n.getMonth() + 1).padStart(2, '0')
-    const d = String(n.getDate()).padStart(2, '0')
-    return `${y}-${m}-${d}`
-  })
+  // glass date picker (filter just the KPI production cards)
+  const [dayPick, setDayPick] = useState<string>('')
 
   useEffect(() => {
     let alive = true
@@ -54,24 +48,36 @@ export default function DashboardPage() {
 
       const { data: prof } = await supabase
         .from('profiles')
-        .select('id,first_name,last_name,email')
+        .select('id,first_name,last_name,role,is_agency_owner')
         .eq('id', user.id)
         .single()
 
-      const nm =
-        `${(prof?.first_name || '').trim()} ${(prof?.last_name || '').trim()}`.trim() ||
-        (prof?.email || '').trim() ||
-        'Agent'
+      const p = (prof || {
+        id: user.id,
+        first_name: null,
+        last_name: null,
+        role: 'agent',
+        is_agency_owner: false,
+      }) as Profile
 
-      const { data, error } = await supabase
+      if (!alive) return
+      setMe(p)
+
+      const isOwner = !!p.is_agency_owner || (p.role || '').toLowerCase() === 'admin'
+
+      // OWNER/ADMIN: all deals (team)
+      // AGENT: only their own deals
+      let q = supabase
         .from('deals')
         .select('id,user_id,created_at,premium,company')
         .order('created_at', { ascending: false })
-        .limit(2500)
+        .limit(2000)
+
+      if (!isOwner) q = q.eq('user_id', user.id)
+
+      const { data, error } = await q
 
       if (!alive) return
-
-      setMeName(nm)
 
       if (error) {
         setDeals([])
@@ -97,8 +103,8 @@ export default function DashboardPage() {
         typeof d.premium === 'number'
           ? d.premium
           : typeof d.premium === 'string'
-          ? Number(d.premium.replace(/[^0-9.]/g, ''))
-          : Number(d.premium || 0)
+            ? Number(d.premium.replace(/[^0-9.]/g, ''))
+            : Number(d.premium || 0)
 
       return {
         ...d,
@@ -123,52 +129,26 @@ export default function DashboardPage() {
   const weekStart = startOfWeek(now)
   const monthStart = startOfMonth(now)
 
-  const pickStart = useMemo(() => {
-    const [y, m, d] = dayPick.split('-').map((x) => Number(x))
-    return new Date(y, (m || 1) - 1, d || 1, 0, 0, 0, 0)
-  }, [dayPick])
-
-  const pickEnd = useMemo(() => {
-    const e = new Date(pickStart)
-    e.setDate(e.getDate() + 1)
-    return e
-  }, [pickStart])
-
   const todayDeals = useMemo(() => parsed.filter((d) => d.dt >= todayStart), [parsed, todayStart])
   const weekDeals = useMemo(() => parsed.filter((d) => d.dt >= weekStart), [parsed, weekStart])
   const monthDeals = useMemo(() => parsed.filter((d) => d.dt >= monthStart), [parsed, monthStart])
 
-  const dayDealsPicked = useMemo(
-    () => parsed.filter((d) => d.dt >= pickStart && d.dt < pickEnd),
-    [parsed, pickStart, pickEnd]
+  // Production (month) for the top 3 mini stats
+  const monthProduction = useMemo(
+    () => monthDeals.reduce((s, d) => s + d.premiumNum, 0),
+    [monthDeals]
   )
 
-  const dayProduction = useMemo(
-    () => dayDealsPicked.reduce((s, d) => s + d.premiumNum, 0),
-    [dayDealsPicked]
-  )
-
-  const dayDealsCount = useMemo(() => dayDealsPicked.length, [dayDealsPicked])
-
+  // Writing Agents (unique writers in month)
   const writingAgents = useMemo(() => {
-    const uniq = new Set(dayDealsPicked.map((d) => d.user_id))
+    const uniq = new Set(monthDeals.map((d) => d.user_id))
     return uniq.size
-  }, [dayDealsPicked])
-
-  const topCarrier = useMemo(() => {
-    const map = new Map<string, number>()
-    monthDeals.forEach((d) => map.set(d.companySafe, (map.get(d.companySafe) || 0) + 1))
-    let best = '—'
-    let bestCount = 0
-    for (const [k, v] of map.entries()) {
-      if (v > bestCount) {
-        best = k
-        bestCount = v
-      }
-    }
-    return bestCount === 0 ? '—' : best
   }, [monthDeals])
 
+  // Deals submitted (month) — replaces "Top Carrier" at top
+  const monthDealCount = useMemo(() => monthDeals.length, [monthDeals])
+
+  // last 7 days count line
   const last7 = useMemo(() => {
     const days: { label: string; count: number }[] = []
     for (let i = 6; i >= 0; i--) {
@@ -177,6 +157,7 @@ export default function DashboardPage() {
       const dStart = startOfDay(d)
       const next = new Date(dStart)
       next.setDate(dStart.getDate() + 1)
+
       const count = parsed.filter((x) => x.dt >= dStart && x.dt < next).length
       const label = d.toLocaleDateString(undefined, { weekday: 'short' })
       days.push({ label, count })
@@ -187,114 +168,62 @@ export default function DashboardPage() {
   const lineLabels = useMemo(() => last7.map((x) => x.label), [last7])
   const lineValues = useMemo(() => last7.map((x) => x.count), [last7])
 
+  // carrier dist donut
   const carrierDist = useMemo(() => {
     const map = new Map<string, number>()
     monthDeals.forEach((d) => map.set(d.companySafe, (map.get(d.companySafe) || 0) + 1))
-    const entries = Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, 6)
+    const entries = Array.from(map.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
     const labels = entries.length ? entries.map((e) => e[0]) : ['No Data']
     const values = entries.length ? entries.map((e) => e[1]) : [100]
     return { labels, values }
   }, [monthDeals])
 
-  const todaysProduction = useMemo(
-    () => todayDeals.reduce((s, d) => s + d.premiumNum, 0),
-    [todayDeals]
-  )
-  const weeksProduction = useMemo(
-    () => weekDeals.reduce((s, d) => s + d.premiumNum, 0),
-    [weekDeals]
-  )
-  const monthsProduction = useMemo(
-    () => monthDeals.reduce((s, d) => s + d.premiumNum, 0),
-    [monthDeals]
-  )
+  // KPI production cards — filtered by optional dayPick
+  const kpiWindow = useMemo(() => {
+    if (!dayPick) return null
+    const d = parseISO(dayPick)
+    const start = startOfDay(d)
+    const end = new Date(start)
+    end.setDate(start.getDate() + 1)
+    return { start, end }
+  }, [dayPick])
 
-  const [leaderRows, setLeaderRows] = useState<{ user_id: string; name: string; premium: number }[]>(
-    []
-  )
-
-  useEffect(() => {
-    let alive = true
-    ;(async () => {
-      const { data: userRes } = await supabase.auth.getUser()
-      const user = userRes.user
-      if (!user) return
-
-      const map = new Map<string, number>()
-      monthDeals.forEach((d) => map.set(d.user_id, (map.get(d.user_id) || 0) + d.premiumNum))
-
-      const ids = Array.from(map.keys())
-      let profs: ProfileRow[] = []
-      if (ids.length) {
-        const { data } = await supabase.from('profiles').select('id,first_name,last_name,email').in('id', ids)
-        profs = (data || []) as ProfileRow[]
-      }
-
-      const nameById = new Map<string, string>()
-      profs.forEach((p) => {
-        const nm =
-          `${(p.first_name || '').trim()} ${(p.last_name || '').trim()}`.trim() ||
-          (p.email || '').trim() ||
-          'Agent'
-        nameById.set(p.id, nm)
-      })
-
-      const sorted = ids
-        .map((id) => ({ user_id: id, name: nameById.get(id) || 'Agent', premium: map.get(id) || 0 }))
-        .sort((a, b) => b.premium - a.premium)
-
-      const me = sorted.find((x) => x.user_id === user.id) || {
-        user_id: user.id,
-        name: meName || 'You',
-        premium: map.get(user.id) || 0,
-      }
-
-      const top5 = sorted.slice(0, 5)
-      const rest = top5.filter((x) => x.user_id !== user.id)
-
-      if (!alive) return
-      setLeaderRows([me, ...rest].slice(0, 5))
-    })()
-    return () => {
-      alive = false
+  const kpiTodayProduction = useMemo(() => {
+    if (kpiWindow) {
+      return parsed
+        .filter((d) => d.dt >= kpiWindow.start && d.dt < kpiWindow.end)
+        .reduce((s, d) => s + d.premiumNum, 0)
     }
-  }, [monthDeals, meName])
+    return todayDeals.reduce((s, d) => s + d.premiumNum, 0)
+  }, [kpiWindow, parsed, todayDeals])
+
+  const kpiWeekProduction = useMemo(() => {
+    if (kpiWindow) {
+      // for a picked day, "This Week" = that week containing the picked day
+      const base = kpiWindow.start
+      const ws = startOfWeek(base)
+      return parsed.filter((d) => d.dt >= ws && d.dt < kpiWindow.end).reduce((s, d) => s + d.premiumNum, 0)
+    }
+    return weekDeals.reduce((s, d) => s + d.premiumNum, 0)
+  }, [kpiWindow, parsed, weekDeals])
+
+  const kpiMonthProduction = useMemo(() => {
+    if (kpiWindow) {
+      const ms = startOfMonth(kpiWindow.start)
+      return parsed.filter((d) => d.dt >= ms && d.dt < kpiWindow.end).reduce((s, d) => s + d.premiumNum, 0)
+    }
+    return monthDeals.reduce((s, d) => s + d.premiumNum, 0)
+  }, [kpiWindow, parsed, monthDeals])
 
   const weeklyGoal = 20
   const monthlyGoal = 90
 
-  const recentRows = useMemo(() => {
-    return (loading ? [] : parsed.slice(0, 6)).map((d) => ({
-      id: d.id,
-      agentId: d.user_id,
-      premium: d.premiumNum,
-      dt: d.dt,
-    }))
-  }, [parsed, loading])
-
-  const [recentNames, setRecentNames] = useState<Map<string, string>>(new Map())
-
-  useEffect(() => {
-    let alive = true
-    ;(async () => {
-      const ids = Array.from(new Set(recentRows.map((r) => r.agentId))).filter(Boolean)
-      if (!ids.length) return
-      const { data } = await supabase.from('profiles').select('id,first_name,last_name,email').in('id', ids)
-      const m = new Map<string, string>()
-      ;((data || []) as ProfileRow[]).forEach((p) => {
-        const nm =
-          `${(p.first_name || '').trim()} ${(p.last_name || '').trim()}`.trim() ||
-          (p.email || '').trim() ||
-          'Agent'
-        m.set(p.id, nm)
-      })
-      if (!alive) return
-      setRecentNames(m)
-    })()
-    return () => {
-      alive = false
-    }
-  }, [recentRows])
+  const name = useMemo(() => {
+    const n = `${me?.first_name || ''} ${me?.last_name || ''}`.trim()
+    return n || 'Agent'
+  }, [me])
 
   return (
     <div className="min-h-screen bg-[#0b0f1a] text-white">
@@ -304,7 +233,7 @@ export default function DashboardPage() {
         <header className="px-10 pt-10 pb-6 flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
-            <p className="text-sm text-white/60 mt-1">Welcome Back {meName}</p>
+            <p className="text-sm text-white/60 mt-1">Welcome back {name}.</p>
           </div>
 
           <div className="flex items-center gap-3">
@@ -321,36 +250,15 @@ export default function DashboardPage() {
         </header>
 
         <main className="px-10 pb-12">
-          {/* DATE PICKER (own entity, smaller, no clipping) */}
-          <section className="mb-4">
-            <div className="inline-flex items-center gap-3 glass px-4 py-3 rounded-2xl border border-white/10 overflow-visible">
-              <div className="text-xs text-white/60 whitespace-nowrap">Pick day</div>
-              <div className="w-[200px] overflow-visible">
-                {/* IMPORTANT: container must be overflow-visible so the dropdown isn't cut off */}
-                <div className="relative overflow-visible">
-                  <div className="overflow-visible">
-                    <FlowDatePicker value={dayPick} onChange={setDayPick} />
-                  </div>
-                </div>
-              </div>
-              <div className="text-xs text-white/50 whitespace-nowrap">
-                Used for Production / Writing Agents / Deals submitted
-              </div>
-            </div>
-          </section>
-
-          {/* TOP 3 CARDS (smaller) */}
+          {/* Mini stats (smaller) */}
           <section className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <MiniStatCompact
-              label="Production"
-              value={loading ? '—' : `$${formatMoneyPrecise(dayProduction)}`}
-            />
-            <MiniStatCompact label="Writing Agents ✅" value={loading ? '—' : String(writingAgents)} />
-            <MiniStatCompact label="Deals submitted" value={loading ? '—' : String(dayDealsCount)} />
+            <MiniStat label="Production" value={loading ? '—' : `$${formatMoney(monthProduction)}`} />
+            <MiniStat label="Writing Agents" value={loading ? '—' : String(writingAgents)} />
+            <MiniStat label="Deals Submitted" value={loading ? '—' : String(monthDealCount)} />
           </section>
 
           <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 glass p-6">
+            <div className="lg:col-span-2 glass p-6 overflow-visible">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-base font-semibold">Flow Trend</h2>
                 <span className="text-xs text-white/60">Last 7 days</span>
@@ -369,44 +277,48 @@ export default function DashboardPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-                <KPI title="Today’s production" value={loading ? '—' : `$${formatMoneyPrecise(todaysProduction)}`} sub="" />
-                <KPI title="This weeks production" value={loading ? '—' : `$${formatMoneyPrecise(weeksProduction)}`} sub="" />
-                <KPI title="This months production" value={loading ? '—' : `$${formatMoneyPrecise(monthsProduction)}`} sub="" />
+              {/* Date picker as its own entity above KPI cards */}
+              <div className="mt-6">
+                <div className="text-xs text-white/55 mb-2">Filter KPI production by day (optional)</div>
+                <div className="max-w-[220px] relative z-50">
+                  <FlowDatePicker value={dayPick} onChange={setDayPick} />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                <KPI title="Today" value={loading ? '—' : `$${formatMoney(kpiTodayProduction)}`} sub="Today’s production" />
+                <KPI title="This Week" value={loading ? '—' : `$${formatMoney(kpiWeekProduction)}`} sub="This weeks production" />
+                <KPI title="This Month" value={loading ? '—' : `$${formatMoney(kpiMonthProduction)}`} sub="This months production" />
               </div>
             </div>
 
-            <div className="glass p-6">
+            <div className="glass p-6 overflow-hidden">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-base font-semibold">Leaderboard</h2>
-                <Link href="/leaderboard" className="text-xs text-white/60 hover:underline">
+                <a
+                  href="/leaderboard"
+                  className="text-xs text-white/70 hover:text-white transition underline underline-offset-4"
+                >
                   All results →
-                </Link>
+                </a>
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4 mb-5">
                 <CarrierDonut labels={carrierDist.labels} values={carrierDist.values} />
               </div>
 
-              {/* FIX: prevent off-screen by enforcing min-w-0 + truncation */}
+              {/* keep "you" at top, but prevent overflow */}
               <div className="space-y-3">
-                {leaderRows.length === 0 ? (
-                  <Leader rank={1} name="You" amount={loading ? '—' : '$0.00'} highlight />
-                ) : (
-                  leaderRows.map((r, idx) => (
-                    <Leader
-                      key={r.user_id}
-                      rank={idx + 1}
-                      name={r.name}
-                      amount={loading ? '—' : `$${formatMoneyPrecise(r.premium)}`}
-                      highlight={idx === 0}
-                    />
-                  ))
-                )}
+                <Leader
+                  rank={1}
+                  name={name}
+                  amount={loading ? '—' : `$${formatMoney(monthProduction)}`}
+                  highlight
+                />
               </div>
 
               <div className="mt-4 text-xs text-white/50">
-                Top carrier this month: {loading ? '—' : topCarrier}
+                Full agency leaderboard is in Leaderboard.
               </div>
             </div>
           </section>
@@ -418,13 +330,14 @@ export default function DashboardPage() {
             </div>
 
             <div className="rounded-2xl border border-white/10 overflow-hidden">
-              <Row head left="Agent" mid="Premium ✅" right="Time" />
-              {recentRows.map((r) => (
+              {/* Requested: Carrier -> Agent Name (best available is user_id unless you joined profiles elsewhere) */}
+              <Row head left="Agent" mid="Premium" right="Time" />
+              {(loading ? [] : parsed.slice(0, 6)).map((d) => (
                 <Row
-                  key={r.id}
-                  left={recentNames.get(r.agentId) || 'Agent'}
-                  mid={`$${formatMoneyPrecise(r.premium)}`}
-                  right={byHour(r.dt)}
+                  key={d.id}
+                  left={d.user_id}
+                  mid={`$${formatMoney(d.premiumNum)}`}
+                  right={timeHour(d.dt)}
                 />
               ))}
               {!loading && parsed.length === 0 && <Row left="—" mid="No deals yet" right="—" />}
@@ -441,14 +354,14 @@ function KPI({ title, value, sub }: { title: string; value: string; sub: string 
     <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
       <p className="text-xs text-white/60">{title}</p>
       <div className="mt-1 flex items-baseline gap-2">
-        <span className="text-3xl font-semibold">{value}</span>
-        {sub ? <span className="text-xs text-white/50">{sub}</span> : null}
+        <span className="text-2xl font-semibold">{value}</span>
       </div>
+      <div className="text-xs text-white/50 mt-1">{sub}</div>
     </div>
   )
 }
 
-function MiniStatCompact({ label, value }: { label: string; value: string }) {
+function MiniStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="glass p-4">
       <p className="text-xs text-white/60">{label}</p>
@@ -470,32 +383,27 @@ function Leader({
 }) {
   return (
     <div
-      className={`flex items-center justify-between gap-3 rounded-2xl border border-white/10 px-4 py-3 ${
+      className={`flex items-center justify-between rounded-2xl border border-white/10 px-4 py-3 ${
         highlight ? 'bg-white/10' : 'bg-white/5'
       }`}
     >
-      {/* FIX: min-w-0 so text can truncate instead of pushing amount off-screen */}
       <div className="flex items-center gap-3 min-w-0">
         <div
-          className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center text-sm font-bold ${
+          className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm font-bold ${
             highlight ? 'bg-blue-600' : 'bg-white/10'
           }`}
         >
           {rank}
         </div>
-
         <div className="min-w-0">
           <div className={`${highlight ? 'text-base font-semibold' : 'text-sm font-medium'} truncate`}>
             {name}
           </div>
-          <div className="text-xs text-white/50 truncate">Monthly production</div>
+          <div className="text-xs text-white/50">Monthly production</div>
         </div>
       </div>
 
-      {/* FIX: keep amount visible */}
-      <div
-        className={`${highlight ? 'text-lg font-semibold' : 'text-sm font-semibold'} text-green-400 shrink-0`}
-      >
+      <div className={`${highlight ? 'text-lg font-semibold' : 'text-sm font-semibold'} text-green-400 whitespace-nowrap`}>
         {amount}
       </div>
     </div>
@@ -520,17 +428,22 @@ function Row({
       }`}
     >
       <div className="truncate">{left}</div>
-      <div className="text-center truncate">{mid}</div>
-      <div className="text-right truncate">{right}</div>
+      <div className="text-center">{mid}</div>
+      <div className="text-right">{right}</div>
     </div>
   )
 }
 
-function formatMoneyPrecise(n: number) {
-  const num = Number(n || 0)
-  return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+function formatMoney(n: number) {
+  return Math.round(n).toLocaleString()
 }
 
-function byHour(d: Date) {
+function timeHour(d: Date) {
+  // show by hour like "1:45 AM"
   return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+}
+
+function parseISO(iso: string) {
+  const [y, m, d] = iso.split('-').map((x) => Number(x))
+  return new Date(y, (m || 1) - 1, d || 1)
 }
