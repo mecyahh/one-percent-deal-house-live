@@ -1,106 +1,111 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Sidebar from '../components/Sidebar'
 import { supabase } from '@/lib/supabaseClient'
 
 type Row = {
-  id: string
   agent_id: string
-  full_name: string | null
-  premium: number | null
-  created_at: string
+  total_deals: number
+  total_premium: number
+  total_coverage: number
 }
 
-type Agent = {
-  agent_id: string
-  name: string
-  deals: number
-  premium: number
+type Profile = {
+  id: string
+  first_name: string | null
+  last_name: string | null
+  email: string | null
+  theme?: string | null
 }
 
 export default function LeaderboardPage() {
   const [loading, setLoading] = useState(true)
-  const [rows, setRows] = useState<Row[]>([])
   const [toast, setToast] = useState<string | null>(null)
-
-  const chimeRef = useRef<HTMLAudioElement | null>(null)
+  const [rows, setRows] = useState<Row[]>([])
+  const [profiles, setProfiles] = useState<Record<string, Profile>>({})
 
   useEffect(() => {
-    // initial load
-    load(false)
-
-    // polling loop
-    const id = setInterval(() => {
-      load(true)
-    }, 15000) // 15s
-
-    return () => clearInterval(id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    load()
   }, [])
 
-  async function load(announceIfChanged: boolean) {
-    const { data, error } = await supabase
+  async function load() {
+    setLoading(true)
+
+    // 1) Aggregate leaderboard by agent_id (NOT client name)
+    const { data: dealsAgg, error: dealsErr } = await supabase
       .from('deals')
-      .select('id, agent_id, full_name, premium, created_at')
-      .order('created_at', { ascending: false })
+      .select('agent_id, premium, coverage')
+      .not('agent_id', 'is', null)
       .limit(5000)
 
-    if (error || !data) {
+    if (dealsErr) {
+      setToast('Could not load deals')
       setLoading(false)
       return
     }
 
-    const nextRows = data as Row[]
-    const nextTop = computeAgents(nextRows)[0]
+    const agg = new Map<string, Row>()
 
-    if (announceIfChanged && nextTop?.agent_id) {
-      const key = 'flow_leader_top1'
-      const prev = localStorage.getItem(key)
+    for (const d of dealsAgg || []) {
+      const agent_id = (d as any).agent_id as string
+      if (!agent_id) continue
 
-      // initialize once silently
-      if (!prev) {
-        localStorage.setItem(key, nextTop.agent_id)
-      } else if (prev !== nextTop.agent_id) {
-        localStorage.setItem(key, nextTop.agent_id)
-        const msg = `🏆 New #1: ${nextTop.name}`
-        setToast(msg)
-        playChime()
-        notify(msg)
+      const premium = Number((d as any).premium || 0)
+      const coverage = Number((d as any).coverage || 0)
+
+      const cur = agg.get(agent_id) || {
+        agent_id,
+        total_deals: 0,
+        total_premium: 0,
+        total_coverage: 0,
       }
+
+      cur.total_deals += 1
+      cur.total_premium += Number.isFinite(premium) ? premium : 0
+      cur.total_coverage += Number.isFinite(coverage) ? coverage : 0
+
+      agg.set(agent_id, cur)
     }
 
-    setRows(nextRows)
+    const leaderboard = Array.from(agg.values()).sort((a, b) => b.total_deals - a.total_deals)
+    setRows(leaderboard)
+
+    // 2) Fetch matching profiles for display names
+    const agentIds = leaderboard.map((r) => r.agent_id)
+    if (agentIds.length === 0) {
+      setProfiles({})
+      setLoading(false)
+      return
+    }
+
+    const { data: profs, error: profErr } = await supabase
+      .from('profiles')
+      .select('id, first_name, last_name, email, theme')
+      .in('id', agentIds)
+
+    if (profErr) {
+      setToast('Could not load agent profiles')
+      setLoading(false)
+      return
+    }
+
+    const map: Record<string, Profile> = {}
+    for (const p of profs || []) map[(p as any).id] = p as any
+    setProfiles(map)
+
     setLoading(false)
   }
 
-  function playChime() {
-    try {
-      if (!chimeRef.current) chimeRef.current = new Audio('/chime.mp3')
-      chimeRef.current.currentTime = 0
-      chimeRef.current.play().catch(() => {})
-    } catch {}
-  }
-
-  async function enableNotifications() {
-    if (!('Notification' in window)) return
-    if (Notification.permission === 'granted') return
-    await Notification.requestPermission()
-  }
-
-  function notify(message: string) {
-    try {
-      if (!('Notification' in window)) return
-      if (Notification.permission !== 'granted') return
-      new Notification('Flow Leaderboard', { body: message })
-    } catch {}
-  }
-
-  const agents = useMemo(() => computeAgents(rows), [rows])
-  const top1 = agents[0]
-  const top2 = agents[1]
-  const top3 = agents[2]
-  const rest = agents.slice(3)
+  const display = useMemo(() => {
+    return rows.map((r, idx) => {
+      const p = profiles[r.agent_id]
+      const name = p
+        ? `${(p.first_name || '').trim()} ${(p.last_name || '').trim()}`.trim() || p.email || 'Agent'
+        : 'Agent'
+      return { ...r, rank: idx + 1, name }
+    })
+  }, [rows, profiles])
 
   return (
     <div className="min-h-screen bg-[#0b0f1a] text-white">
@@ -110,20 +115,9 @@ export default function LeaderboardPage() {
         <div className="fixed top-5 right-5 z-50">
           <div className="glass px-5 py-4 rounded-2xl border border-white/10 shadow-2xl">
             <div className="text-sm font-semibold">{toast}</div>
-            <div className="text-xs text-white/60 mt-1">Leaderboard updated.</div>
-
             <div className="mt-3 flex gap-2">
-              <button
-                className="flex-1 rounded-xl bg-white/10 hover:bg-white/15 transition px-3 py-2 text-xs"
-                onClick={() => setToast(null)}
-              >
-                Dismiss
-              </button>
-              <button
-                className="flex-1 rounded-xl bg-blue-600 hover:bg-blue-500 transition px-3 py-2 text-xs font-semibold"
-                onClick={() => setToast(null)}
-              >
-                Let’s go
+              <button className="rounded-xl bg-white/10 hover:bg-white/15 transition px-3 py-2 text-xs" onClick={() => setToast(null)}>
+                OK
               </button>
             </div>
           </div>
@@ -134,176 +128,53 @@ export default function LeaderboardPage() {
         <div className="mb-8 flex items-end justify-between">
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">Leaderboard</h1>
-            <p className="text-sm text-white/60 mt-1">Top producers — live.</p>
+            <p className="text-sm text-white/60 mt-1">Ranks are based on agent performance (never client names).</p>
           </div>
-
-          <div className="flex items-center gap-3">
-            <button
-              onClick={enableNotifications}
-              className="glass px-4 py-2 text-sm font-medium hover:bg-white/10 transition"
-              title="Enable browser notifications for #1 changes"
-            >
-              Enable Alerts
-            </button>
-            <button
-              onClick={() => load(true)}
-              className="glass px-4 py-2 text-sm font-medium hover:bg-white/10 transition"
-            >
-              Refresh
-            </button>
-          </div>
+          <button onClick={load} className="glass px-4 py-2 text-sm font-medium hover:bg-white/10 transition rounded-2xl border border-white/10">
+            Refresh
+          </button>
         </div>
 
-        {/* Top 3 podium */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-10">
-          <div className="lg:col-span-4">
-            <PodiumCard rank={2} label="🥈 Runner Up" agent={top2} loading={loading} accent="silver" />
-          </div>
-          <div className="lg:col-span-4">
-            <PodiumCard rank={1} label="🏆 CHAMPION" agent={top1} loading={loading} accent="gold" featured />
-          </div>
-          <div className="lg:col-span-4">
-            <PodiumCard rank={3} label="🥉 Top 3" agent={top3} loading={loading} accent="bronze" />
-          </div>
-        </div>
-
-        {/* Full list */}
         <div className="glass rounded-2xl border border-white/10 overflow-hidden">
-          <div className="grid grid-cols-5 px-6 py-3 text-xs text-white/60 bg-white/5">
-            <div>#</div>
-            <div className="col-span-2">Agent</div>
-            <div>Deals</div>
-            <div>Total Premium</div>
+          <div className="px-6 py-4 bg-white/5 flex items-center justify-between">
+            <div className="text-sm font-semibold">Top Agents</div>
+            <div className="text-xs text-white/60">{display.length} agents</div>
           </div>
 
           {loading && <div className="px-6 py-10 text-center text-white/60">Loading…</div>}
 
-          {!loading && agents.length === 0 && (
-            <div className="px-6 py-10 text-center text-white/60">No data yet.</div>
+          {!loading && display.length === 0 && (
+            <div className="px-6 py-10 text-center text-white/60">No agent deals yet.</div>
           )}
 
-          {!loading &&
-            rest.map((a, idx) => (
-              <div
-                key={a.agent_id}
-                className="grid grid-cols-5 px-6 py-4 border-t border-white/10 hover:bg-white/5 transition"
-              >
-                <div className="font-semibold">{idx + 4}</div>
-                <div className="col-span-2 font-medium">{a.name}</div>
-                <div>{a.deals}</div>
-                <div className="font-semibold">${money(a.premium)}</div>
-              </div>
-            ))}
+          {!loading && display.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-[11px] text-white/55">
+                  <tr className="border-b border-white/10">
+                    <th className="text-left px-6 py-3">Rank</th>
+                    <th className="text-left px-6 py-3">Agent</th>
+                    <th className="text-left px-6 py-3">Deals</th>
+                    <th className="text-left px-6 py-3">Total Premium</th>
+                    <th className="text-left px-6 py-3">Total Coverage</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {display.map((r) => (
+                    <tr key={r.agent_id} className="border-b border-white/10 hover:bg-white/5 transition">
+                      <td className="px-6 py-4 font-semibold">{r.rank}</td>
+                      <td className="px-6 py-4 font-semibold">{r.name}</td>
+                      <td className="px-6 py-4 text-white/80">{r.total_deals}</td>
+                      <td className="px-6 py-4 text-white/80">${r.total_premium.toLocaleString()}</td>
+                      <td className="px-6 py-4 text-white/80">${r.total_coverage.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </div>
   )
-}
-
-function computeAgents(rows: Row[]) {
-  const map = new Map<string, Agent>()
-  for (const r of rows) {
-    const id = r.agent_id
-    if (!id) continue
-    if (!map.has(id)) {
-      map.set(id, {
-        agent_id: id,
-        name: (r.full_name || 'Agent').trim(),
-        deals: 0,
-        premium: 0,
-      })
-    }
-    const a = map.get(id)!
-    a.deals += 1
-    a.premium += Number(r.premium || 0)
-  }
-  return Array.from(map.values()).sort((a, b) => b.premium - a.premium)
-}
-
-function PodiumCard({
-  rank,
-  label,
-  agent,
-  loading,
-  featured,
-  accent,
-}: {
-  rank: 1 | 2 | 3
-  label: string
-  agent?: { name: string; premium: number; deals: number }
-  loading: boolean
-  featured?: boolean
-  accent: 'gold' | 'silver' | 'bronze'
-}) {
-  const accentStyles =
-    accent === 'gold'
-      ? 'from-yellow-500/25 via-blue-500/10 to-transparent border-yellow-500/25'
-      : accent === 'silver'
-      ? 'from-white/20 via-blue-500/10 to-transparent border-white/15'
-      : 'from-orange-500/20 via-blue-500/10 to-transparent border-orange-500/20'
-
-  const ring =
-    accent === 'gold'
-      ? 'ring-1 ring-yellow-400/25'
-      : accent === 'silver'
-      ? 'ring-1 ring-white/15'
-      : 'ring-1 ring-orange-400/20'
-
-  const height = featured ? 'min-h-[190px]' : 'min-h-[170px]'
-  const titleSize = featured ? 'text-3xl' : 'text-2xl'
-
-  return (
-    <div className={['relative overflow-hidden rounded-2xl border bg-white/5 backdrop-blur-xl', ring, height].join(' ')}>
-      <div className={['pointer-events-none absolute inset-0 bg-gradient-to-br', accentStyles].join(' ')} />
-      <div className="pointer-events-none absolute -top-10 left-10 h-40 w-40 rotate-12 rounded-full bg-white/10 blur-2xl" />
-
-      <div className="relative p-6">
-        <div className="flex items-start justify-between">
-          <div>
-            <div className="text-xs text-white/60">{label}</div>
-            <div className={`mt-2 font-semibold tracking-tight ${titleSize}`}>
-              {loading ? 'Loading…' : agent?.name || '—'}
-            </div>
-          </div>
-
-          <div
-            className={[
-              'flex items-center justify-center rounded-2xl px-3 py-2 text-xs font-semibold border',
-              accent === 'gold'
-                ? 'border-yellow-400/25 bg-yellow-500/10'
-                : accent === 'silver'
-                ? 'border-white/15 bg-white/5'
-                : 'border-orange-400/20 bg-orange-500/10',
-            ].join(' ')}
-          >
-            #{rank}
-          </div>
-        </div>
-
-        <div className="mt-5 grid grid-cols-2 gap-3">
-          <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-            <div className="text-[11px] text-white/55">Deals</div>
-            <div className="mt-1 text-lg font-semibold">{loading ? '—' : agent?.deals ?? 0}</div>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-            <div className="text-[11px] text-white/55">Total Premium</div>
-            <div className="mt-1 text-lg font-semibold">
-              {loading ? '—' : `$${money(agent?.premium ?? 0)}`}
-            </div>
-          </div>
-        </div>
-
-        {featured && (
-          <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-white/70">
-            <span className="text-white/50 mr-2">Energy:</span>#1 spot claimed. Keep the pace.
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function money(n: number) {
-  return Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 }
