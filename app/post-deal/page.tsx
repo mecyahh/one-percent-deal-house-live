@@ -1,10 +1,11 @@
+// ✅ FILE: /app/post-deal/page.tsx  (REPLACE ENTIRE FILE)
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import Sidebar from '../components/Sidebar'
 import { supabase } from '@/lib/supabaseClient'
-
-const RELATIONSHIPS = ['Spouse', 'Child', 'Parent', 'Friend', 'Sibling', 'Estate', 'Other'] as const
+import FlowDatePicker from '@/app/components/FlowDatePicker'
 
 const CARRIERS = [
   'Aetna',
@@ -16,533 +17,286 @@ const CARRIERS = [
   'Transamerica',
 ] as const
 
-export default function PostDealPage() {
-  const [loading, setLoading] = useState(false)
-  const [ready, setReady] = useState(false)
-  const [msg, setMsg] = useState<string | null>(null)
+type Profile = {
+  id: string
+  first_name: string | null
+  last_name: string | null
+  email: string | null
+}
 
+type CarrierOutlineRow = {
+  id: string
+  user_id: string
+  carrier: string
+  producer_number: string | null
+}
+
+export default function PostDealPage() {
+  const router = useRouter()
+
+  const [loading, setLoading] = useState(true)
+  const [toast, setToast] = useState<string | null>(null)
+
+  const [me, setMe] = useState<Profile | null>(null)
+  const [carrierOutline, setCarrierOutline] = useState<Map<string, string>>(new Map())
+
+  // form
   const [fullName, setFullName] = useState('')
   const [phone, setPhone] = useState('')
-  const [dob, setDob] = useState('') // YYYY-MM-DD
-  const [effectiveDate, setEffectiveDate] = useState('') // YYYY-MM-DD
-
-  const [company, setCompany] = useState<(typeof CARRIERS)[number]>('Aetna')
-  const [premium, setPremium] = useState('')
-  const [coverage, setCoverage] = useState('')
-
+  const [dob, setDob] = useState('')
+  const [company, setCompany] = useState('')
   const [policyNumber, setPolicyNumber] = useState('')
-  const [beneficiary, setBeneficiary] = useState('')
-  const [beneficiaryRelationship, setBeneficiaryRelationship] =
-    useState<(typeof RELATIONSHIPS)[number]>('Spouse')
+  const [coverage, setCoverage] = useState('')
+  const [premium, setPremium] = useState('')
   const [notes, setNotes] = useState('')
 
+  // submit
+  const [submitting, setSubmitting] = useState(false)
+
   useEffect(() => {
-    ;(async () => {
-      const { data } = await supabase.auth.getUser()
-      if (!data.user) {
-        window.location.href = '/login'
-        return
-      }
-      setReady(true)
-    })()
+    boot()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  async function submitDeal() {
-    setMsg(null)
-
-    const premiumNum = parseMoneyToNumber(premium)
-    const coverageNum = parseMoneyToNumber(coverage)
-
-    if (!fullName.trim() || !String(company).trim() || premiumNum <= 0) {
-      setMsg('Full name, company, and premium are required.')
-      return
-    }
-
+  async function boot() {
     setLoading(true)
 
     const { data: userRes } = await supabase.auth.getUser()
-    const user = userRes.user
-    if (!user) {
-      setLoading(false)
+    const uid = userRes.user?.id
+    if (!uid) {
       window.location.href = '/login'
       return
     }
 
-    const payload: any = {
-      user_id: user.id,
-      full_name: fullName.trim(),
-      phone: normalizePhone(phone) || null,
-      client_dob: dob || null,
-      effective_date: effectiveDate || null,
-      company: String(company).trim(),
-      premium: premiumNum,
-      coverage: coverageNum > 0 ? coverageNum : null,
-      policy_number: policyNumber.trim() || null,
-      beneficiary: beneficiary.trim() || null,
-      beneficiary_relationship: beneficiaryRelationship,
-      notes: notes.trim() || null,
-      status: 'Submitted',
-    }
+    // profile
+    const { data: prof } = await supabase
+      .from('profiles')
+      .select('id, first_name, last_name, email')
+      .eq('id', uid)
+      .single()
 
-    const { error } = await supabase.from('deals').insert(payload)
+    setMe((prof as Profile) || null)
+
+    // carrier outline (producer # validation)
+    // expects table: carrier_outline with columns: user_id, carrier, producer_number
+    const { data: outlines } = await supabase
+      .from('carrier_outline')
+      .select('id,user_id,carrier,producer_number')
+      .eq('user_id', uid)
+      .limit(5000)
+
+    const map = new Map<string, string>()
+    ;((outlines as CarrierOutlineRow[]) || []).forEach((r) => {
+      const key = (r.carrier || '').trim().toLowerCase()
+      const pn = (r.producer_number || '').trim()
+      if (key && pn) map.set(key, pn)
+    })
+    setCarrierOutline(map)
 
     setLoading(false)
+  }
 
-    if (error) {
-      setMsg(error.message)
-      return
+  const canSubmit = useMemo(() => {
+    return !!(fullName.trim() && company.trim() && premium.trim())
+  }, [fullName, company, premium])
+
+  async function fireDiscordWebhook(dealId: string) {
+    const { data } = await supabase.auth.getSession()
+    const token = data.session?.access_token
+    if (!token) return
+
+    await fetch('/api/webhooks/deal-posted', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ deal_id: dealId }),
+    }).catch(() => {})
+  }
+
+  async function submit() {
+    if (submitting) return
+    setSubmitting(true)
+
+    try {
+      const { data: userRes } = await supabase.auth.getUser()
+      const uid = userRes.user?.id
+      if (!uid) {
+        window.location.href = '/login'
+        return
+      }
+
+      const carrierKey = company.trim().toLowerCase()
+
+      // ✅ BLOCK if no producer number on carrier outline
+      const producerNumber = carrierOutline.get(carrierKey)
+      if (!producerNumber) {
+        setToast('Agent does not have an active license for this carrier, please submit your producer number in your deal house')
+        setSubmitting(false)
+        return
+      }
+
+      const payload = {
+        agent_id: uid, // your project uses agent_id on deals
+        full_name: fullName.trim() || null,
+        phone: cleanPhone(phone) || null,
+        dob: dob || null,
+        company: company.trim() || null,
+        policy_number: policyNumber.trim() || null,
+        coverage: toNum(coverage),
+        premium: toNum(premium),
+        status: 'pending',
+        note: notes.trim() || null,
+        notes: notes.trim() || null,
+        // optional: store producer number snapshot if you want (only if column exists)
+        // producer_number: producerNumber,
+      }
+
+      const { data: inserted, error } = await supabase
+        .from('deals')
+        .insert(payload)
+        .select('id')
+        .single()
+
+      if (error) {
+        setToast('Deal submit failed')
+        setSubmitting(false)
+        return
+      }
+
+      // ✅ send discord webhook (best-effort)
+      if (inserted?.id) await fireDiscordWebhook(inserted.id)
+
+      // ✅ route back to dashboard + refresh
+      router.push('/dashboard?refresh=1')
+      router.refresh()
+    } finally {
+      setSubmitting(false)
     }
-
-    setMsg('Deal submitted ✅')
-    clearForm()
-  }
-
-  function clearForm() {
-    setFullName('')
-    setPhone('')
-    setDob('')
-    setEffectiveDate('')
-    setCompany('Aetna')
-    setPremium('')
-    setCoverage('')
-    setPolicyNumber('')
-    setBeneficiary('')
-    setBeneficiaryRelationship('Spouse')
-    setNotes('')
-  }
-
-  if (!ready) {
-    return (
-      <div className="min-h-screen bg-[#0b0f1a] text-white flex items-center justify-center">
-        <div className="glass px-6 py-4">Loading…</div>
-      </div>
-    )
   }
 
   return (
     <div className="min-h-screen bg-[#0b0f1a] text-white">
       <Sidebar />
 
+      {toast && (
+        <div className="fixed top-5 right-5 z-50">
+          <div className="glass px-5 py-4 rounded-2xl border border-white/10 shadow-2xl">
+            <div className="text-sm font-semibold">{toast}</div>
+            <div className="mt-3 flex gap-2">
+              <button className={btnSoft} onClick={() => setToast(null)}>
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="ml-64 px-10 py-10">
-        <div className="flex items-end justify-between mb-8">
+        <div className="mb-8 flex items-end justify-between">
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">Post a Deal</h1>
-            <p className="text-sm text-white/60 mt-1">Clean submission. Everything flows.</p>
+            <p className="text-sm text-white/60 mt-1">Fast. Clean. Glass. No duplicates, no friction.</p>
           </div>
 
-          <button
-            onClick={() => (window.location.href = '/dashboard')}
-            className="glass px-4 py-2 text-sm font-medium hover:bg-white/10 transition"
-          >
+          <button onClick={() => router.push('/dashboard')} className={btnGlass}>
             Back to Dashboard
           </button>
         </div>
 
-        <div className="glass p-7 max-w-3xl">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label="Full Name *">
-              <Input value={fullName} onChange={setFullName} placeholder="John Doe" />
-            </Field>
+        <div className="glass rounded-2xl border border-white/10 p-6">
+          {loading ? (
+            <div className="px-6 py-10 text-center text-white/60">Loading…</div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Field label="Full Name">
+                  <input className={inputCls} value={fullName} onChange={(e) => setFullName(e.target.value)} />
+                </Field>
 
-            <Field label="Phone">
-              <Input
-                value={phone}
-                onChange={(v) => setPhone(formatPhoneLive(v))}
-                placeholder="(888)888-8888"
-                inputMode="tel"
-              />
-            </Field>
+                <Field label="Phone">
+                  <input className={inputCls} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(888) 888-8888" />
+                </Field>
 
-            <Field label="Client DOB">
-              <FlowDatePicker value={dob} onChange={setDob} />
-            </Field>
+                <Field label="Client DOB">
+                  <FlowDatePicker value={dob} onChange={setDob} placeholder="Select DOB" />
+                </Field>
 
-            <Field label="Company *">
-              <Select value={company} onChange={(v) => setCompany(v as any)} options={CARRIERS as any} />
-            </Field>
+                <Field label="Company">
+                  <select className={inputCls} value={company} onChange={(e) => setCompany(e.target.value)}>
+                    <option value="">Select…</option>
+                    {CARRIERS.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
 
-            <Field label="Premium (monthly) *">
-              <Input
-                value={premium}
-                onChange={setPremium}
-                onBlurFormat="money"
-                placeholder="1,000.00"
-                inputMode="decimal"
-              />
-            </Field>
+                <Field label="Coverage">
+                  <input className={inputCls} value={coverage} onChange={(e) => setCoverage(e.target.value)} placeholder="100000" />
+                </Field>
 
-            <Field label="Coverage">
-              <Input
-                value={coverage}
-                onChange={setCoverage}
-                onBlurFormat="money"
-                placeholder="250,000.00"
-                inputMode="decimal"
-              />
-            </Field>
+                <Field label="Premium">
+                  <input className={inputCls} value={premium} onChange={(e) => setPremium(e.target.value)} placeholder="100" />
+                </Field>
 
-            <Field label="Effective Date">
-              <FlowDatePicker value={effectiveDate} onChange={setEffectiveDate} />
-            </Field>
+                <Field label="Policy #">
+                  <input className={inputCls} value={policyNumber} onChange={(e) => setPolicyNumber(e.target.value)} />
+                </Field>
 
-            <Field label="Policy Number">
-              <Input value={policyNumber} onChange={setPolicyNumber} placeholder="Policy #" />
-            </Field>
+                <Field label="Notes">
+                  <textarea
+                    className={`${inputCls} min-h-[110px]`}
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Quick notes…"
+                  />
+                </Field>
+              </div>
 
-            <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field label="Beneficiary">
-                <Input value={beneficiary} onChange={setBeneficiary} placeholder="Jane Doe" />
-              </Field>
+              <button
+                onClick={submit}
+                disabled={!canSubmit || submitting}
+                className={[
+                  'mt-6 w-full rounded-2xl px-4 py-3 text-sm font-semibold transition',
+                  !canSubmit || submitting ? 'bg-white/10 text-white/40 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500',
+                ].join(' ')}
+              >
+                {submitting ? 'Submitting…' : 'Submit Deal'}
+              </button>
 
-              <Field label="Relationship">
-                <Select
-                  value={beneficiaryRelationship}
-                  onChange={(v) => setBeneficiaryRelationship(v as any)}
-                  options={RELATIONSHIPS as any}
-                />
-              </Field>
-            </div>
-
-            <div className="md:col-span-2">
-              <Field label="Notes">
-                <Textarea value={notes} onChange={setNotes} placeholder="Anything important…" />
-              </Field>
-            </div>
-          </div>
-
-          {msg && (
-            <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm">
-              {msg}
-            </div>
+              <div className="mt-3 text-[11px] text-white/45">
+                You must have a producer number saved for the selected carrier in Carrier Outline.
+              </div>
+            </>
           )}
-
-          <div className="mt-6 flex items-center justify-end gap-3">
-            <button
-              onClick={() => {
-                setMsg(null)
-                clearForm()
-              }}
-              className="glass px-4 py-2 text-sm font-medium hover:bg-white/10 transition"
-              disabled={loading}
-            >
-              Clear
-            </button>
-
-            <button
-              onClick={submitDeal}
-              disabled={loading}
-              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-semibold transition disabled:opacity-60"
-            >
-              {loading ? 'Submitting…' : 'Submit Deal'}
-            </button>
-          </div>
-
-          <div className="mt-4 text-xs text-white/40">
-            Phone auto-formats. Premium/Coverage auto-format on blur.
-          </div>
         </div>
       </div>
     </div>
   )
 }
 
-/* ---------------- UI ---------------- */
-
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="block">
-      <div className="text-xs text-white/60 mb-2">{label}</div>
+    <div>
+      <div className="text-[11px] text-white/55 mb-2">{label}</div>
       {children}
-    </label>
-  )
-}
-
-function Input({
-  value,
-  onChange,
-  placeholder,
-  type = 'text',
-  inputMode,
-  onBlurFormat,
-}: {
-  value: string
-  onChange: (v: string) => void
-  placeholder?: string
-  type?: string
-  inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode']
-  onBlurFormat?: 'money'
-}) {
-  return (
-    <input
-      type={type}
-      value={value}
-      placeholder={placeholder}
-      inputMode={inputMode}
-      onChange={(e) => onChange(e.target.value)}
-      onBlur={() => {
-        if (onBlurFormat === 'money') onChange(formatMoneyLive(value))
-      }}
-      className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-blue-500/60"
-    />
-  )
-}
-
-function Textarea({
-  value,
-  onChange,
-  placeholder,
-}: {
-  value: string
-  onChange: (v: string) => void
-  placeholder?: string
-}) {
-  return (
-    <textarea
-      value={value}
-      placeholder={placeholder}
-      onChange={(e) => onChange(e.target.value)}
-      rows={4}
-      className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-blue-500/60 resize-none"
-    />
-  )
-}
-
-function Select({
-  value,
-  onChange,
-  options,
-}: {
-  value: string
-  onChange: (v: string) => void
-  options: readonly string[]
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-blue-500/60"
-    >
-      {options.map((opt) => (
-        <option key={opt} value={opt} className="bg-[#0b0f1a]">
-          {opt}
-        </option>
-      ))}
-    </select>
-  )
-}
-
-/* ---------------- Calendar Upgrade ---------------- */
-
-function FlowDatePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const [open, setOpen] = useState(false)
-  const anchorRef = useRef<HTMLDivElement | null>(null)
-
-  const initial = useMemo(() => (value ? parseISO(value) : new Date()), [value])
-  const [viewYear, setViewYear] = useState(initial.getFullYear())
-  const [viewMonth, setViewMonth] = useState(initial.getMonth()) // 0-11
-
-  useEffect(() => {
-    function onDocClick(e: MouseEvent) {
-      if (!open) return
-      const t = e.target as Node
-      if (anchorRef.current && !anchorRef.current.contains(t)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
-  }, [open])
-
-  useEffect(() => {
-    if (!open) return
-    const d = value ? parseISO(value) : new Date()
-    setViewYear(d.getFullYear())
-    setViewMonth(d.getMonth())
-  }, [open, value])
-
-  const monthLabel = new Date(viewYear, viewMonth, 1).toLocaleDateString(undefined, {
-    month: 'long',
-    year: 'numeric',
-  })
-
-  const grid = buildMonthGrid(viewYear, viewMonth) // 6 rows x 7 cols
-
-  return (
-    <div className="relative" ref={anchorRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((s) => !s)}
-        className="w-full text-left rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none hover:bg-white/7 transition flex items-center justify-between"
-      >
-        <span className={value ? 'text-white' : 'text-white/50'}>
-          {value ? pretty(value) : 'Select date'}
-        </span>
-        <span className="text-white/50">📅</span>
-      </button>
-
-      {open && (
-        <div className="absolute z-50 mt-2 w-[320px] rounded-2xl border border-white/10 bg-[#0b0f1a]/90 backdrop-blur-xl shadow-2xl overflow-hidden">
-          <div className="px-4 py-3 flex items-center justify-between border-b border-white/10">
-            <button
-              type="button"
-              onClick={() => {
-                const d = new Date(viewYear, viewMonth, 1)
-                d.setMonth(d.getMonth() - 1)
-                setViewYear(d.getFullYear())
-                setViewMonth(d.getMonth())
-              }}
-              className="h-9 w-9 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition"
-            >
-              ‹
-            </button>
-
-            <div className="text-sm font-semibold">{monthLabel}</div>
-
-            <button
-              type="button"
-              onClick={() => {
-                const d = new Date(viewYear, viewMonth, 1)
-                d.setMonth(d.getMonth() + 1)
-                setViewYear(d.getFullYear())
-                setViewMonth(d.getMonth())
-              }}
-              className="h-9 w-9 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition"
-            >
-              ›
-            </button>
-          </div>
-
-          <div className="px-4 py-3">
-            <div className="grid grid-cols-7 gap-1 text-[11px] text-white/50 mb-2">
-              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
-                <div key={d} className="text-center">
-                  {d}
-                </div>
-              ))}
-            </div>
-
-            <div className="grid grid-cols-7 gap-1">
-              {grid.flat().map((cell, i) => {
-                const iso = toISO(cell.date)
-                const isSelected = value === iso
-                const isThisMonth = cell.inMonth
-                const isToday = iso === toISO(new Date())
-
-                return (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => {
-                      onChange(iso)
-                      setOpen(false)
-                    }}
-                    className={[
-                      'h-10 rounded-xl text-sm transition border',
-                      isSelected
-                        ? 'bg-blue-600 border-blue-500/60 text-white'
-                        : 'bg-white/5 border-white/10 hover:bg-white/10',
-                      !isThisMonth ? 'text-white/30' : 'text-white',
-                      isToday && !isSelected ? 'ring-1 ring-white/15' : '',
-                    ].join(' ')}
-                  >
-                    {cell.date.getDate()}
-                  </button>
-                )
-              })}
-            </div>
-
-            <div className="mt-3 flex items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  onChange(toISO(new Date()))
-                  setOpen(false)
-                }}
-                className="flex-1 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-3 py-2 text-xs"
-              >
-                Today
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  onChange('')
-                  setOpen(false)
-                }}
-                className="flex-1 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-3 py-2 text-xs"
-              >
-                Clear
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
 
-function buildMonthGrid(year: number, month: number) {
-  const first = new Date(year, month, 1)
-  const startDowMon0 = (first.getDay() + 6) % 7 // convert Sun(0) -> 6, Mon(1)->0
-  const start = new Date(year, month, 1 - startDowMon0)
-
-  const grid: { date: Date; inMonth: boolean }[][] = []
-  let cur = new Date(start)
-  for (let r = 0; r < 6; r++) {
-    const row: { date: Date; inMonth: boolean }[] = []
-    for (let c = 0; c < 7; c++) {
-      row.push({ date: new Date(cur), inMonth: cur.getMonth() === month })
-      cur.setDate(cur.getDate() + 1)
-    }
-    grid.push(row)
-  }
-  return grid
+function toNum(v: any) {
+  if (v === null || v === undefined || v === '') return null
+  const num = Number(String(v).replace(/[^0-9.]/g, ''))
+  return Number.isFinite(num) ? num : null
 }
 
-function parseISO(iso: string) {
-  const [y, m, d] = iso.split('-').map((x) => Number(x))
-  return new Date(y, (m || 1) - 1, d || 1)
+function cleanPhone(raw: string) {
+  const digits = (raw || '').replace(/\D/g, '').slice(0, 10)
+  if (digits.length !== 10) return raw?.trim() || null
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`
 }
 
-function toISO(d: Date) {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
-
-function pretty(iso: string) {
-  const d = parseISO(iso)
-  return d.toLocaleDateString(undefined, { month: 'short', day: '2-digit', year: 'numeric' })
-}
-
-/* ---------------- formatting helpers ---------------- */
-
-function digitsOnly(s: string) {
-  return (s || '').replace(/\D/g, '')
-}
-
-function formatPhoneLive(input: string) {
-  const d = digitsOnly(input).slice(0, 10)
-  const a = d.slice(0, 3)
-  const b = d.slice(3, 6)
-  const c = d.slice(6, 10)
-  if (d.length <= 3) return a ? `(${a}` : ''
-  if (d.length <= 6) return `(${a})${b}`
-  return `(${a})${b}-${c}`
-}
-
-function normalizePhone(input: string) {
-  const d = digitsOnly(input)
-  if (d.length !== 10) return ''
-  return `(${d.slice(0, 3)})${d.slice(3, 6)}-${d.slice(6, 10)}`
-}
-
-function parseMoneyToNumber(input: string) {
-  const cleaned = (input || '').replace(/[^0-9.]/g, '')
-  const n = Number(cleaned)
-  return isNaN(n) ? 0 : n
-}
-
-function formatMoneyLive(input: string) {
-  const n = parseMoneyToNumber(input)
-  if (!isFinite(n)) return ''
-  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
+const inputCls =
+  'w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-white/20 focus:bg-white/7'
+const btnGlass = 'glass px-4 py-2 text-sm font-medium hover:bg-white/10 transition rounded-2xl border border-white/10'
+const btnSoft = 'rounded-xl bg-white/10 hover:bg-white/15 transition px-3 py-2 text-xs'
