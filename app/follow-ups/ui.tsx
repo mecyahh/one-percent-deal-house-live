@@ -303,17 +303,27 @@ export default function FollowUpsClient() {
                 />
               </Field>
 
-              <Field label="Follow Up Time">
-                <input
-                  type="time"
-                  className={inputCls}
-                  value={form.follow_up_time}
-                  onChange={(e) => {
-                    setPreset('custom')
-                    setForm((f) => ({ ...f, follow_up_time: e.target.value }))
-                  }}
-                />
-              </Field>
+             <Field label="Follow Up Time">
+  <div className="relative">
+    <input
+      type="time"
+      value={form.follow_up_time}
+      onChange={(e) => {
+        setPreset('custom')
+        setForm((f) => ({ ...f, follow_up_time: e.target.value }))
+      }}
+      className="
+        w-full rounded-2xl border border-white/10
+        bg-white/5 backdrop-blur-xl
+        px-4 py-3 text-sm outline-none
+        hover:bg-white/7 transition
+        focus:border-white/20 focus:bg-white/7
+        text-white
+        [color-scheme:dark]
+      "
+    />
+  </div>
+</Field>
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
