@@ -1,12 +1,12 @@
-// FILE: /app/follow-ups/ui.tsx
-// ACTION: CREATE THIS FILE (NEW) AND PASTE ENTIRE CODE
+// ✅ FILE: /app/follow-ups/ui.tsx
+// ✅ ACTION: REPLACE ENTIRE FILE
 
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import FlowDatePicker from '@/app/components/FlowDatePicker'
 import Sidebar from '../components/Sidebar'
 import { supabase } from '@/lib/supabaseClient'
+import FlowDatePicker from '@/app/components/FlowDatePicker'
 
 type FollowUp = {
   id: string
@@ -14,7 +14,6 @@ type FollowUp = {
   agent_id: string
   full_name: string | null
   phone: string | null
-  dob: string | null
   company: string | null
   coverage: number | null
   follow_up_at: string | null
@@ -41,10 +40,12 @@ export default function FollowUpsClient() {
   const [form, setForm] = useState({
     full_name: '',
     phone: '',
-    dob: '',
+    // ✅ using new calendar (no native date input)
+    dob: '', // stored in notes (not DB) so we don't require follow_ups.dob column
     company: '',
     coverage: '',
-    follow_up_at: '',
+    follow_up_date: '', // YYYY-MM-DD
+    follow_up_time: '09:00', // HH:MM (24h)
     notes: '',
   })
 
@@ -54,6 +55,15 @@ export default function FollowUpsClient() {
 
   useEffect(() => {
     chimeRef.current = typeof Audio !== 'undefined' ? new Audio('/chime.mp3') : null
+
+    // optional: default follow up date to today
+    const now = new Date()
+    setForm((f) => ({
+      ...f,
+      follow_up_date: toISODateLocal(now),
+      follow_up_time: '09:00',
+    }))
+
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -68,18 +78,19 @@ export default function FollowUpsClient() {
       return
     }
 
+    // ✅ IMPORTANT: removed dob from SELECT because your table does NOT have follow_ups.dob
     const { data, error } = await supabase
       .from('follow_ups')
-      .select('id, created_at, agent_id, full_name, phone, dob, company, coverage, follow_up_at, notes, status')
+      .select('id, created_at, agent_id, full_name, phone, company, coverage, follow_up_at, notes, status')
       .eq('agent_id', uid)
       .order('follow_up_at', { ascending: true })
       .limit(3000)
 
-   if (error) {
-  setToast(`Could not load follow ups: ${error.message}`)
-  setLoading(false)
-  return
-}
+    if (error) {
+      setToast(`Could not load follow ups (RLS): ${error.message}`)
+      setLoading(false)
+      return
+    }
 
     setRows((data || []) as FollowUp[])
     setLoading(false)
@@ -108,11 +119,9 @@ export default function FollowUpsClient() {
   useEffect(() => {
     if (!alertsOn) return
     if (dueNowList.length === 0) return
-
     try {
       chimeRef.current?.play().catch(() => {})
     } catch {}
-
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alertsOn, dueNowList.length])
 
@@ -125,7 +134,14 @@ export default function FollowUpsClient() {
     if (p === '48') base.setHours(base.getHours() + 48)
     if (p === 'week') base.setDate(base.getDate() + 7)
 
-    setForm((f) => ({ ...f, follow_up_at: toLocalInput(base) }))
+    const yyyyMmDd = toISODateLocal(base)
+    const hhmm = toTimeHHMM(base)
+
+    setForm((f) => ({
+      ...f,
+      follow_up_date: yyyyMmDd,
+      follow_up_time: hhmm,
+    }))
   }
 
   async function submit() {
@@ -133,30 +149,49 @@ export default function FollowUpsClient() {
     const uid = userRes.user?.id
     if (!uid) return setToast('Not logged in')
 
+    if (!form.follow_up_date) return setToast('Follow up date is required')
+
+    const followUpISO = combineLocalDateTimeISO(form.follow_up_date, form.follow_up_time || '09:00')
+
+    // ✅ store DOB in notes so we don't need a DB column
+    // (keeps your "DOB" UI without breaking your schema)
+    const packedNotes = buildNotes({
+      dob: form.dob || '',
+      notes: form.notes || '',
+    })
+
     const payload = {
       agent_id: uid,
       full_name: form.full_name.trim() || null,
       phone: cleanPhone(form.phone),
-      dob: form.dob || null,
       company: form.company || null,
       coverage: toNum(form.coverage),
-      follow_up_at: form.follow_up_at ? new Date(form.follow_up_at + 'T00:00:00').toISOString() : null,
-      notes: form.notes.trim() || null,
+      follow_up_at: followUpISO,
+      notes: packedNotes || null,
       status: 'upcoming',
     }
 
     const { error } = await supabase.from('follow_ups').insert(payload)
-    if (error) return setToast('Submit failed')
+    if (error) return setToast(`Submit failed: ${error.message}`)
 
     setToast('Follow up submitted ✅')
-    setForm({ full_name: '', phone: '', dob: '', company: '', coverage: '', follow_up_at: '', notes: '' })
+    setForm({
+      full_name: '',
+      phone: '',
+      dob: '',
+      company: '',
+      coverage: '',
+      follow_up_date: '',
+      follow_up_time: '09:00',
+      notes: '',
+    })
     setPreset('')
     load()
   }
 
   async function setStatus(id: string, status: FollowUp['status']) {
     const { error } = await supabase.from('follow_ups').update({ status }).eq('id', id)
-    if (error) return setToast('Update failed')
+    if (error) return setToast(`Update failed: ${error.message}`)
     load()
   }
 
@@ -208,22 +243,36 @@ export default function FollowUpsClient() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Field label="Full Name">
-                <input className={inputCls} value={form.full_name} onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))} />
+                <input
+                  className={inputCls}
+                  value={form.full_name}
+                  onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))}
+                />
               </Field>
 
               <Field label="Phone">
-                <input className={inputCls} value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: cleanPhone(e.target.value) || '' }))} placeholder="(888) 888-8888" />
+                <input
+                  className={inputCls}
+                  value={form.phone}
+                  onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+                  placeholder="(888) 888-8888"
+                />
               </Field>
 
-             <Field label="Client DOB">
-  <FlowDatePicker
-    value={form.dob}
-    onChange={(v) => setForm((f) => ({ ...f, dob: v }))}
-    placeholder="Select DOB"
-  />
-</Field>
+              <Field label="Client DOB">
+                <FlowDatePicker
+                  value={form.dob}
+                  onChange={(v) => setForm((f) => ({ ...f, dob: v }))}
+                  placeholder="Select DOB"
+                />
+              </Field>
+
               <Field label="Company">
-                <select className={inputCls} value={form.company} onChange={(e) => setForm((f) => ({ ...f, company: e.target.value }))}>
+                <select
+                  className={inputCls}
+                  value={form.company}
+                  onChange={(e) => setForm((f) => ({ ...f, company: e.target.value }))}
+                >
                   <option value="">Select…</option>
                   {CARRIERS.map((c) => (
                     <option key={c} value={c}>
@@ -234,31 +283,37 @@ export default function FollowUpsClient() {
               </Field>
 
               <Field label="Coverage">
-                <input className={inputCls} value={form.coverage} onChange={(e) => setForm((f) => ({ ...f, coverage: e.target.value }))} placeholder="100000" />
+                <input
+                  className={inputCls}
+                  value={form.coverage}
+                  onChange={(e) => setForm((f) => ({ ...f, coverage: e.target.value }))}
+                  placeholder="100000.00"
+                  inputMode="decimal"
+                />
               </Field>
 
-            <Field label="Follow Up Date">
-  <FlowDatePicker
-    value={form.follow_up_date}
-    onChange={(v) => {
-      setPreset('custom')
-      setForm((f) => ({ ...f, follow_up_date: v }))
-    }}
-    placeholder="Select date"
-  />
-</Field>
+              <Field label="Follow Up Date">
+                <FlowDatePicker
+                  value={form.follow_up_date}
+                  onChange={(v) => {
+                    setPreset('custom')
+                    setForm((f) => ({ ...f, follow_up_date: v }))
+                  }}
+                  placeholder="Select date"
+                />
+              </Field>
 
-<Field label="Follow Up Time">
-  <input
-    type="time"
-    className={inputCls}
-    value={form.follow_up_time}
-    onChange={(e) => {
-      setPreset('custom')
-      setForm((f) => ({ ...f, follow_up_time: e.target.value }))
-    }}
-  />
-</Field>
+              <Field label="Follow Up Time">
+                <input
+                  type="time"
+                  className={inputCls}
+                  value={form.follow_up_time}
+                  onChange={(e) => {
+                    setPreset('custom')
+                    setForm((f) => ({ ...f, follow_up_time: e.target.value }))
+                  }}
+                />
+              </Field>
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
@@ -278,7 +333,11 @@ export default function FollowUpsClient() {
 
             <div className="mt-4">
               <Field label="Notes">
-                <textarea className={`${inputCls} min-h-[110px]`} value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
+                <textarea
+                  className={`${inputCls} min-h-[110px]`}
+                  value={form.notes}
+                  onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                />
               </Field>
             </div>
 
@@ -289,22 +348,16 @@ export default function FollowUpsClient() {
 
           {/* LISTS */}
           <div className="space-y-6">
-            <Section title={`Due Now`} count={dueNowList.length}>
+            <Section title="Due Now" count={dueNowList.length}>
               {loading && <Empty text="Loading…" />}
               {!loading && dueNowList.length === 0 && <Empty text="No follow ups." />}
-              {!loading &&
-                dueNowList.map((r) => (
-                  <Card key={r.id} r={r} due={true} onStatus={setStatus} />
-                ))}
+              {!loading && dueNowList.map((r) => <Card key={r.id} r={r} due={true} onStatus={setStatus} />)}
             </Section>
 
-            <Section title={`Upcoming`} count={upcomingList.length}>
+            <Section title="Upcoming" count={upcomingList.length}>
               {loading && <Empty text="Loading…" />}
               {!loading && upcomingList.length === 0 && <Empty text="No follow ups." />}
-              {!loading &&
-                upcomingList.map((r) => (
-                  <Card key={r.id} r={r} due={false} onStatus={setStatus} />
-                ))}
+              {!loading && upcomingList.map((r) => <Card key={r.id} r={r} due={false} onStatus={setStatus} />)}
             </Section>
           </div>
         </div>
@@ -322,6 +375,9 @@ function Card({
   due: boolean
   onStatus: (id: string, status: FollowUp['status']) => void
 }) {
+  const parsed = parsePackedNotes(r.notes || '')
+  const dob = parsed.dob || ''
+
   return (
     <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
       <div className="flex items-start justify-between gap-3">
@@ -331,9 +387,18 @@ function Card({
             {r.phone || '—'} • {r.company || '—'}
           </div>
           <div className="text-xs text-white/60 mt-1">
-            {r.coverage ? `$${Number(r.coverage).toLocaleString()}` : '—'} • {r.follow_up_at ? prettyDT(r.follow_up_at) : '—'}
+            {r.coverage != null ? `$${Number(r.coverage).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+            {' • '}
+            {r.follow_up_at ? prettyDT(r.follow_up_at) : '—'}
           </div>
-          {r.notes ? <div className="text-xs text-white/70 mt-2">{r.notes}</div> : null}
+
+          {dob ? (
+            <div className="text-xs text-white/60 mt-1">
+              DOB: {prettyDateOnly(dob)}
+            </div>
+          ) : null}
+
+          {parsed.notes ? <div className="text-xs text-white/70 mt-2">{parsed.notes}</div> : null}
         </div>
 
         <div className="text-[11px] px-2 py-1 rounded-xl border border-white/10 bg-white/5 text-white/70">
@@ -408,6 +473,11 @@ function prettyDT(iso: string) {
   return d.toLocaleString()
 }
 
+function prettyDateOnly(isoDate: string) {
+  const d = parseISODate(isoDate)
+  return d.toLocaleDateString(undefined, { month: 'short', day: '2-digit', year: 'numeric' })
+}
+
 function toNum(v: any) {
   const s = String(v || '').replace(/[^0-9.]/g, '')
   if (!s) return null
@@ -421,14 +491,52 @@ function cleanPhone(raw: string) {
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`
 }
 
-function toLocalInput(d: Date) {
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const yyyy = d.getFullYear()
-  const mm = pad(d.getMonth() + 1)
-  const dd = pad(d.getDate())
-  const hh = pad(d.getHours())
-  const mi = pad(d.getMinutes())
-  return `${yyyy}-${mm}-${dd}T${hh}:${mi}`
+function toISODateLocal(d: Date) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function toTimeHHMM(d: Date) {
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  return `${hh}:${mm}`
+}
+
+function combineLocalDateTimeISO(date: string, time: string) {
+  // date: YYYY-MM-DD, time: HH:MM
+  const [y, m, d] = date.split('-').map((x) => Number(x))
+  const [hh, mm] = time.split(':').map((x) => Number(x))
+  const dt = new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0, 0, 0) // LOCAL time
+  return dt.toISOString()
+}
+
+// ✅ Pack DOB into notes so we don't require follow_ups.dob column
+function buildNotes({ dob, notes }: { dob: string; notes: string }) {
+  const parts: string[] = []
+  if (dob) parts.push(`dob: ${dob}`)
+  if (notes.trim()) parts.push(`notes: ${notes.trim()}`)
+  return parts.join('\n')
+}
+
+function parsePackedNotes(raw: string) {
+  const out: { dob?: string; notes?: string } = {}
+  const lines = String(raw || '').split('\n')
+  for (const line of lines) {
+    const mDob = line.match(/^dob:\s*(.+)$/i)
+    if (mDob) out.dob = mDob[1].trim()
+    const mNotes = line.match(/^notes:\s*(.+)$/i)
+    if (mNotes) out.notes = mNotes[1].trim()
+  }
+  // fallback: if it's plain notes and not packed
+  if (!out.notes && raw && !out.dob) out.notes = raw.trim()
+  return out
+}
+
+function parseISODate(iso: string) {
+  const [y, m, d] = iso.split('-').map((x) => Number(x))
+  return new Date(y, (m || 1) - 1, d || 1)
 }
 
 const inputCls =
