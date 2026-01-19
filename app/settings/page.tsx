@@ -24,24 +24,14 @@ type CarrierRow = {
   created_at: string
   name: string
   supported_name: string | null
-  advance_rate: number
-  active: boolean
+  advance_rate: number | null
+  active: boolean | null
   sort_order: number | null
   eapp_url: string | null
   portal_url: string | null
   support_phone: string | null
   logo_url: string | null
 }
-
-const SUPPORTED_NAMES = [
-  'Aetna',
-  'Aflac',
-  'Royal Neighbors of America',
-  'SBLI',
-  'Transamerica',
-  'American Amicable',
-  'Mutual of Omaha',
-] as const
 
 const THEMES = [
   { key: 'blue', label: 'Grey / Blue / White' },
@@ -60,7 +50,6 @@ function errMsg(e: any) {
   return e?.message || e?.error_description || e?.error || 'Something failed'
 }
 
-/** consistent action wrapper: every button “does something” */
 async function run<T>(
   setBusy: (v: boolean) => void,
   setToast: (v: string | null) => void,
@@ -93,7 +82,7 @@ export default function SettingsPage() {
   const [pFirst, setPFirst] = useState('')
   const [pLast, setPLast] = useState('')
   const [pEmail, setPEmail] = useState('')
-  const [avatarPreview, setAvatarPreview] = useState<string>('')
+  const [avatarPreview, setAvatarPreview] = useState('')
 
   const [savingProfile, setSavingProfile] = useState(false)
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
@@ -146,10 +135,6 @@ export default function SettingsPage() {
     logo_url: '',
   })
 
-  // stats
-  const [dealCountsByCompany, setDealCountsByCompany] = useState<Map<string, number>>(new Map())
-  const [productCountsByCarrier, setProductCountsByCarrier] = useState<Map<string, number>>(new Map())
-
   const isAdmin = me?.role === 'admin'
   const isOwner = !!me?.is_agency_owner
   const canManageAgents = isAdmin || isOwner
@@ -158,6 +143,12 @@ export default function SettingsPage() {
     boot()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  async function authHeader() {
+    const { data } = await supabase.auth.getSession()
+    const token = data.session?.access_token
+    return token ? `Bearer ${token}` : ''
+  }
 
   async function boot() {
     setBooting(true)
@@ -176,18 +167,16 @@ export default function SettingsPage() {
         .select('id,created_at,email,first_name,last_name,role,is_agency_owner,upline_id,comp,theme,avatar_url')
         .eq('id', uid)
         .single()
-
       if (profErr) throw profErr
+
       const p = prof as Profile
       setMe(p)
-
       setPFirst(p.first_name || '')
       setPLast(p.last_name || '')
       setPEmail(p.email || '')
       setAvatarPreview(p.avatar_url || '')
 
-      const canAgents = p.role === 'admin' || !!p.is_agency_owner
-      if (canAgents) {
+      if (p.role === 'admin' || !!p.is_agency_owner) {
         await loadAgents()
         setTab('agents')
       } else {
@@ -196,19 +185,12 @@ export default function SettingsPage() {
 
       if (p.role === 'admin') {
         await loadCarriers()
-        await loadCarrierStats()
       }
     } catch (e: any) {
       setToast(`Boot failed: ${errMsg(e)}`)
     } finally {
       setBooting(false)
     }
-  }
-
-  async function authHeader() {
-    const { data } = await supabase.auth.getSession()
-    const token = data.session?.access_token
-    return token ? `Bearer ${token}` : ''
   }
 
   async function logout() {
@@ -269,8 +251,8 @@ export default function SettingsPage() {
     const q = agentSearch.trim().toLowerCase()
     if (!q) return agents
     return agents.filter((a) => {
-      const b = [a.first_name, a.last_name, a.email].filter(Boolean).join(' ').toLowerCase()
-      return b.includes(q)
+      const blob = [a.first_name, a.last_name, a.email].filter(Boolean).join(' ').toLowerCase()
+      return blob.includes(q)
     })
   }, [agents, agentSearch])
 
@@ -300,8 +282,8 @@ export default function SettingsPage() {
         headers: { 'Content-Type': 'application/json', Authorization: token },
         body: JSON.stringify({
           email: invite.email.trim(),
-          first_name: invite.first_name.trim() || null,
-          last_name: invite.last_name.trim() || null,
+          first_name: invite.first_name.trim(),
+          last_name: invite.last_name.trim(),
           upline_id: invite.upline_id || null,
           comp: invite.comp,
           role: invite.role,
@@ -309,7 +291,6 @@ export default function SettingsPage() {
           theme: invite.theme,
         }),
       })
-
       const json = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(json.error || 'Invite failed')
 
@@ -344,7 +325,6 @@ export default function SettingsPage() {
           effective_date: pos.effective_date || null,
         }),
       })
-
       const json = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(json.error || 'Update failed')
 
@@ -373,32 +353,12 @@ export default function SettingsPage() {
     }
   }
 
-  async function loadCarrierStats() {
-    // Policies sold from deals.company (string)
-    const { data: deals } = await supabase.from('deals').select('id,company').limit(50000)
-    const mapDeals = new Map<string, number>()
-    ;(deals || []).forEach((d: any) => {
-      const key = String(d.company || '').trim()
-      if (!key) return
-      mapDeals.set(key, (mapDeals.get(key) || 0) + 1)
-    })
-    setDealCountsByCompany(mapDeals)
-
-    // Product counts from carrier_products
-    const { data: prod } = await supabase.from('carrier_products').select('id,carrier_id').limit(50000)
-    const mapProds = new Map<string, number>()
-    ;(prod || []).forEach((p: any) => {
-      mapProds.set(p.carrier_id, (mapProds.get(p.carrier_id) || 0) + 1)
-    })
-    setProductCountsByCarrier(mapProds)
-  }
-
   const filteredCarriers = useMemo(() => {
     const q = carrierSearch.trim().toLowerCase()
     if (!q) return carriers
     return carriers.filter((c) => {
-      const b = [c.name, c.supported_name].filter(Boolean).join(' ').toLowerCase()
-      return b.includes(q)
+      const blob = [c.name, c.supported_name].filter(Boolean).join(' ').toLowerCase()
+      return blob.includes(q)
     })
   }, [carriers, carrierSearch])
 
@@ -408,7 +368,7 @@ export default function SettingsPage() {
       if (!name) throw new Error('Carrier name required')
 
       const adv = Number(newCarrier.advance_rate)
-      if (!Number.isFinite(adv) || adv <= 0) throw new Error('Advance rate invalid')
+      if (!Number.isFinite(adv)) throw new Error('Advance rate invalid')
 
       const sort = newCarrier.sort_order.trim() ? Number(newCarrier.sort_order.trim()) : null
       if (newCarrier.sort_order.trim() && !Number.isFinite(sort as any)) throw new Error('Sort order invalid')
@@ -441,18 +401,7 @@ export default function SettingsPage() {
         logo_url: '',
       })
       await loadCarriers()
-      await loadCarrierStats()
     })
-  }
-
-  function policiesForCarrier(c: CarrierRow) {
-    const a = dealCountsByCompany.get(String(c.name || '').trim()) || 0
-    const b = dealCountsByCompany.get(String(c.supported_name || '').trim()) || 0
-    return Math.max(a, b)
-  }
-
-  function productsForCarrier(c: CarrierRow) {
-    return productCountsByCarrier.get(c.id) || 0
   }
 
   return (
@@ -478,7 +427,7 @@ export default function SettingsPage() {
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
             <p className="text-sm text-white/60 mt-1">
-              Profile{canManageAgents ? ' + Agents + Positions' : ''}{isAdmin ? ' + Carriers' : ''}
+              Profile{canManageAgents ? ' + Agent Management + Positions' : ''}{isAdmin ? ' + Carrier Config' : ''}
             </p>
             {booting && <div className="text-xs text-white/45 mt-2">Loading settings…</div>}
           </div>
@@ -560,7 +509,11 @@ export default function SettingsPage() {
               <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4 flex items-center gap-4">
                 <div className="text-xs text-white/60">Preview</div>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={avatarPreview} alt="avatar" className="h-12 w-12 rounded-2xl border border-white/10 object-cover" />
+                <img
+                  src={avatarPreview}
+                  alt="avatar"
+                  className="h-12 w-12 rounded-2xl border border-white/10 object-cover"
+                />
               </div>
             )}
 
@@ -580,7 +533,7 @@ export default function SettingsPage() {
             <div className="flex items-start justify-between gap-4 mb-5">
               <div>
                 <div className="text-sm font-semibold">Agents</div>
-                <div className="text-xs text-white/55 mt-1">Invite users + view roster. Actions execute immediately.</div>
+                <div className="text-xs text-white/55 mt-1">Invite users + view roster. Buttons execute instantly.</div>
               </div>
 
               <div className="flex items-center gap-2">
@@ -707,25 +660,25 @@ export default function SettingsPage() {
                   value={pos.user_id}
                   onChange={(e) => setPos((p) => ({ ...p, user_id: e.target.value }))}
                 >
-                  <option value="">Select…</option>
-                  {uplineOptions.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.label}
+                  <option value="">Select</option>
+                  {uplineOptions.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.label}
                     </option>
                   ))}
                 </select>
               </Field>
 
-              <Field label="Upline (optional)">
+              <Field label="Upline">
                 <select
                   className={inputCls}
                   value={pos.upline_id}
                   onChange={(e) => setPos((p) => ({ ...p, upline_id: e.target.value }))}
                 >
                   <option value="">None</option>
-                  {uplineOptions.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.label}
+                  {uplineOptions.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.label}
                     </option>
                   ))}
                 </select>
@@ -745,7 +698,7 @@ export default function SettingsPage() {
                 </select>
               </Field>
 
-              <Field label="Effective Date (optional)">
+              <Field label="Effective Date (optional)" className="md:col-span-1">
                 <input
                   type="date"
                   className={inputCls}
@@ -753,187 +706,21 @@ export default function SettingsPage() {
                   onChange={(e) => setPos((p) => ({ ...p, effective_date: e.target.value }))}
                 />
               </Field>
-            </div>
 
-            <button
-              onClick={updatePosition}
-              disabled={savingPosition}
-              className={saveWide + (savingPosition ? ' opacity-50 cursor-not-allowed' : '')}
-            >
-              {savingPosition ? 'Saving…' : 'Save Position'}
-            </button>
-          </div>
-        )}
-
-        {/* CARRIERS */}
-        {tab === 'carriers' && isAdmin && (
-          <div className="glass rounded-2xl border border-white/10 p-6">
-            <div className="flex items-start justify-between gap-4 mb-5">
-              <div>
-                <div className="text-sm font-semibold">Carriers</div>
-                <div className="text-xs text-white/55 mt-1">Admin-only carrier configuration.</div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button onClick={() => setCreateOpen(true)} className={saveBtn}>
-                  Create Carrier
-                </button>
-
+              <div className="md:col-span-2 flex items-end">
                 <button
-                  onClick={() =>
-                    run(setRefreshingCarriers, setToast, 'Carriers refreshed', async () => {
-                      await loadCarriers()
-                      await loadCarrierStats()
-                    })
-                  }
-                  disabled={refreshingCarriers}
-                  className={btnGlass + (refreshingCarriers ? ' opacity-50 cursor-not-allowed' : '')}
+                  onClick={updatePosition}
+                  disabled={savingPosition}
+                  className={saveWide + (savingPosition ? ' opacity-50 cursor-not-allowed' : '')}
                 >
-                  {refreshingCarriers ? 'Refreshing…' : 'Refresh'}
+                  {savingPosition ? 'Saving…' : 'Save Position'}
                 </button>
               </div>
             </div>
 
-            <div className="glass rounded-2xl border border-white/10 px-3 py-2 flex items-center gap-2 mb-4">
-              <input
-                className="bg-transparent outline-none text-sm w-full placeholder:text-white/40"
-                placeholder="Search carriers…"
-                value={carrierSearch}
-                onChange={(e) => setCarrierSearch(e.target.value)}
-              />
+            <div className="mt-5 text-xs text-white/45">
+              Tip: Select user → pick upline + comp → save. Executes immediately.
             </div>
-
-            <div className="rounded-2xl border border-white/10 overflow-hidden">
-              <div className="grid grid-cols-12 px-4 py-3 border-b border-white/10 text-[11px] text-white/60 bg-white/5">
-                <div className="col-span-3">Carrier</div>
-                <div className="col-span-3">Supported Name</div>
-                <div className="col-span-2 text-center">Policies Sold</div>
-                <div className="col-span-2 text-center">Products</div>
-                <div className="col-span-2 text-right">Advance</div>
-              </div>
-
-              {loadingCarriers && <div className="px-4 py-6 text-sm text-white/60">Loading…</div>}
-
-              {!loadingCarriers &&
-                filteredCarriers.map((c) => (
-                  <div key={c.id} className="grid grid-cols-12 px-4 py-3 border-b border-white/10 text-sm items-center">
-                    <div className="col-span-3 font-semibold">
-                      <div className="flex items-center gap-2">
-                        {c.active ? (
-                          <span className="text-[10px] px-2 py-1 rounded-xl border bg-green-500/10 border-green-400/20 text-green-200">
-                            Active
-                          </span>
-                        ) : (
-                          <span className="text-[10px] px-2 py-1 rounded-xl border bg-white/5 border-white/10 text-white/70">
-                            Inactive
-                          </span>
-                        )}
-                        <span>{c.name}</span>
-                      </div>
-                    </div>
-                    <div className="col-span-3 text-white/70">{c.supported_name || '—'}</div>
-                    <div className="col-span-2 text-center">{policiesForCarrier(c)}</div>
-                    <div className="col-span-2 text-center">{productsForCarrier(c)}</div>
-                    <div className="col-span-2 text-right">{Number(c.advance_rate || 0).toFixed(2)}</div>
-                  </div>
-                ))}
-
-              {!loadingCarriers && filteredCarriers.length === 0 && (
-                <div className="px-4 py-6 text-sm text-white/60">No carriers.</div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* INVITE MODAL */}
-        {inviteOpen && (
-          <Modal onClose={() => setInviteOpen(false)} title="Invite Agent">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field label="First Name">
-                <input
-                  className={inputCls}
-                  value={invite.first_name}
-                  onChange={(e) => setInvite((s) => ({ ...s, first_name: e.target.value }))}
-                />
-              </Field>
-
-              <Field label="Last Name">
-                <input
-                  className={inputCls}
-                  value={invite.last_name}
-                  onChange={(e) => setInvite((s) => ({ ...s, last_name: e.target.value }))}
-                />
-              </Field>
-
-              <Field label="Email">
-                <input
-                  className={inputCls}
-                  value={invite.email}
-                  onChange={(e) => setInvite((s) => ({ ...s, email: e.target.value }))}
-                />
-              </Field>
-
-              <Field label="Role">
-                <select
-                  className={inputCls}
-                  value={invite.role}
-                  onChange={(e) => setInvite((s) => ({ ...s, role: e.target.value }))}
-                >
-                  <option value="agent">select</option>
-                  {uplineOptions.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-
-              <Field label="Upline (optional)">
-                <select
-                  className={inputCls}
-                  value={pos.upline_id}
-                  onChange={(e) => setPos((p) => ({ ...p, upline_id: e.target.value }))}
-                >
-                  <option value="">None</option>
-                  {uplineOptions.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-
-              <Field label="Comp %">
-                <select
-                  className={inputCls}
-                  value={pos.comp}
-                  onChange={(e) => setPos((p) => ({ ...p, comp: Number(e.target.value) }))}
-                >
-                  {COMP_VALUES.map((v) => (
-                    <option key={v} value={v}>
-                      {v}%
-                    </option>
-                  ))}
-                </select>
-              </Field>
-
-              <Field label="Effective Date (optional)">
-                <input
-                  type="date"
-                  className={inputCls}
-                  value={pos.effective_date}
-                  onChange={(e) => setPos((p) => ({ ...p, effective_date: e.target.value }))}
-                />
-              </Field>
-            </div>
-
-            <button
-              onClick={updatePosition}
-              disabled={savingPosition}
-              className={saveWide + (savingPosition ? ' opacity-50 cursor-not-allowed' : '')}
-            >
-              {savingPosition ? 'Saving…' : 'Save Position'}
-            </button>
           </div>
         )}
 
@@ -943,21 +730,17 @@ export default function SettingsPage() {
             <div className="flex items-start justify-between gap-4 mb-5">
               <div>
                 <div className="text-sm font-semibold">Carriers</div>
-                <div className="text-xs text-white/55 mt-1">
-                  Configure carrier access, links, and visibility.
-                </div>
+                <div className="text-xs text-white/55 mt-1">Config + links. (Admin only.)</div>
               </div>
 
               <div className="flex items-center gap-2">
                 <button onClick={() => setCreateOpen(true)} className={saveBtn}>
                   Add Carrier
                 </button>
-
                 <button
                   onClick={() =>
                     run(setRefreshingCarriers, setToast, 'Carriers refreshed', async () => {
                       await loadCarriers()
-                      await loadCarrierStats()
                     })
                   }
                   disabled={refreshingCarriers}
@@ -977,111 +760,332 @@ export default function SettingsPage() {
               />
             </div>
 
-            <div className="rounded-2xl border border-white/10 overflow-hidden">
-              <div className="grid grid-cols-12 px-4 py-3 border-b border-white/10 text-[11px] text-white/60 bg-white/5">
-                <div className="col-span-3">Carrier</div>
-                <div className="col-span-2 text-center">Advance</div>
-                <div className="col-span-2 text-center">Policies</div>
-                <div className="col-span-2 text-center">Products</div>
-                <div className="col-span-1 text-center">Active</div>
-                <div className="col-span-2 text-right">Actions</div>
-              </div>
+            {loadingCarriers && <div className="text-sm text-white/60">Loading…</div>}
 
-              {loadingCarriers && <div className="px-4 py-6 text-sm text-white/60">Loading…</div>}
+            {!loadingCarriers && (
+              <div className="rounded-2xl border border-white/10 overflow-hidden">
+                <div className="grid grid-cols-12 px-4 py-3 border-b border-white/10 text-[11px] text-white/60 bg-white/5">
+                  <div className="col-span-3">Carrier</div>
+                  <div className="col-span-2">Advance</div>
+                  <div className="col-span-2">Status</div>
+                  <div className="col-span-2">E-App</div>
+                  <div className="col-span-2">Portal</div>
+                  <div className="col-span-1 text-right">Phone</div>
+                </div>
 
-              {!loadingCarriers &&
-                filteredCarriers.map((c) => (
+                {filteredCarriers.map((c) => (
                   <div key={c.id} className="grid grid-cols-12 px-4 py-3 border-b border-white/10 text-sm items-center">
                     <div className="col-span-3 font-semibold">
                       {c.name}
-                      {c.supported_name && (
-                        <div className="text-[11px] text-white/50">{c.supported_name}</div>
+                      {c.supported_name ? <span className="text-xs text-white/50"> • {c.supported_name}</span> : null}
+                    </div>
+
+                    <div className="col-span-2 text-white/80">{c.advance_rate ?? '—'}</div>
+
+                    <div className="col-span-2">
+                      <span className="text-[11px] px-2 py-1 rounded-xl border border-white/10 bg-white/5 text-white/70">
+                        {c.active === false ? 'inactive' : 'active'}
+                      </span>
+                    </div>
+
+                    <div className="col-span-2">
+                      {c.eapp_url ? (
+                        <a className="text-white/80 hover:text-white underline" href={c.eapp_url} target="_blank" rel="noreferrer">
+                          Open ↗
+                        </a>
+                      ) : (
+                        <span className="text-white/40">—</span>
                       )}
                     </div>
 
-                    <div className="col-span-2 text-center">
-                      {(c.advance_rate * 100).toFixed(2)}%
+                    <div className="col-span-2">
+                      {c.portal_url ? (
+                        <a className="text-white/80 hover:text-white underline" href={c.portal_url} target="_blank" rel="noreferrer">
+                          Open ↗
+                        </a>
+                      ) : (
+                        <span className="text-white/40">—</span>
+                      )}
                     </div>
 
-                    <div className="col-span-2 text-center">
-                      {policiesForCarrier(c)}
-                    </div>
-
-                    <div className="col-span-2 text-center">
-                      {productsForCarrier(c)}
-                    </div>
-
-                    <div className="col-span-1 text-center">
-                      {c.active ? '✅' : '—'}
-                    </div>
-
-                    <div className="col-span-2 flex justify-end gap-2">
-                      <button
-                        onClick={() => setToast('Edit carrier modal next')}
-                        className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-2 py-2"
-                        title="Edit"
-                      >
-                        ✏️
-                      </button>
-                    </div>
+                    <div className="col-span-1 text-right text-white/70">{c.support_phone || '—'}</div>
                   </div>
                 ))}
 
-              {!loadingCarriers && filteredCarriers.length === 0 && (
-                <div className="px-4 py-6 text-sm text-white/60">No carriers.</div>
-              )}
-            </div>
+                {filteredCarriers.length === 0 && <div className="px-4 py-6 text-sm text-white/60">No carriers.</div>}
+              </div>
+            )}
           </div>
         )}
       </div>
+
+      {/* INVITE MODAL */}
+      {inviteOpen && (
+        <Modal title="Invite Agent" onClose={() => setInviteOpen(false)}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Field label="First Name">
+              <input
+                className={inputCls}
+                value={invite.first_name}
+                onChange={(e) => setInvite((x) => ({ ...x, first_name: e.target.value }))}
+              />
+            </Field>
+
+            <Field label="Last Name">
+              <input
+                className={inputCls}
+                value={invite.last_name}
+                onChange={(e) => setInvite((x) => ({ ...x, last_name: e.target.value }))}
+              />
+            </Field>
+
+            <Field label="Email" className="md:col-span-2">
+              <input
+                className={inputCls}
+                value={invite.email}
+                onChange={(e) => setInvite((x) => ({ ...x, email: e.target.value }))}
+              />
+            </Field>
+
+            <Field label="Role">
+              <select
+                className={inputCls}
+                value={invite.role}
+                onChange={(e) => setInvite((x) => ({ ...x, role: e.target.value }))}
+              >
+                <option value="agent">Agent</option>
+                <option value="admin">Admin</option>
+              </select>
+            </Field>
+
+            <Field label="Comp">
+              <select
+                className={inputCls}
+                value={invite.comp}
+                onChange={(e) => setInvite((x) => ({ ...x, comp: Number(e.target.value) }))}
+              >
+                {COMP_VALUES.map((v) => (
+                  <option key={v} value={v}>
+                    {v}%
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="Upline" className="md:col-span-2">
+              <select
+                className={inputCls}
+                value={invite.upline_id}
+                onChange={(e) => setInvite((x) => ({ ...x, upline_id: e.target.value }))}
+              >
+                <option value="">None</option>
+                {uplineOptions.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="Theme" className="md:col-span-2">
+              <select
+                className={inputCls}
+                value={invite.theme}
+                onChange={(e) => setInvite((x) => ({ ...x, theme: e.target.value }))}
+              >
+                {THEMES.map((t) => (
+                  <option key={t.key} value={t.key}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <div className="md:col-span-2 flex items-center gap-3">
+              <input
+                id="owner"
+                type="checkbox"
+                checked={invite.is_agency_owner}
+                onChange={(e) => setInvite((x) => ({ ...x, is_agency_owner: e.target.checked }))}
+              />
+              <label htmlFor="owner" className="text-sm text-white/80">
+                Agency Owner
+              </label>
+            </div>
+          </div>
+
+          <button
+            onClick={inviteAgent}
+            disabled={inviting}
+            className={saveWide + (inviting ? ' opacity-50 cursor-not-allowed' : '')}
+          >
+            {inviting ? 'Sending…' : 'Send Invite'}
+          </button>
+        </Modal>
+      )}
+
+      {/* CREATE CARRIER MODAL */}
+      {createOpen && (
+        <Modal title="Add Carrier" onClose={() => setCreateOpen(false)}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Field label="Name">
+              <input
+                className={inputCls}
+                value={newCarrier.name}
+                onChange={(e) => setNewCarrier((x) => ({ ...x, name: e.target.value }))}
+              />
+            </Field>
+
+            <Field label="Supported Name (optional)">
+              <input
+                className={inputCls}
+                value={newCarrier.supported_name}
+                onChange={(e) => setNewCarrier((x) => ({ ...x, supported_name: e.target.value }))}
+              />
+            </Field>
+
+            <Field label="Advance Rate (e.g. 0.75)">
+              <input
+                className={inputCls}
+                value={newCarrier.advance_rate}
+                onChange={(e) => setNewCarrier((x) => ({ ...x, advance_rate: e.target.value }))}
+              />
+            </Field>
+
+            <Field label="Sort Order (optional)">
+              <input
+                className={inputCls}
+                value={newCarrier.sort_order}
+                onChange={(e) => setNewCarrier((x) => ({ ...x, sort_order: e.target.value }))}
+              />
+            </Field>
+
+            <Field label="E-App URL" className="md:col-span-2">
+              <input
+                className={inputCls}
+                value={newCarrier.eapp_url}
+                onChange={(e) => setNewCarrier((x) => ({ ...x, eapp_url: e.target.value }))}
+              />
+            </Field>
+
+            <Field label="Portal URL" className="md:col-span-2">
+              <input
+                className={inputCls}
+                value={newCarrier.portal_url}
+                onChange={(e) => setNewCarrier((x) => ({ ...x, portal_url: e.target.value }))}
+              />
+            </Field>
+
+            <Field label="Support Phone" className="md:col-span-1">
+              <input
+                className={inputCls}
+                value={newCarrier.support_phone}
+                onChange={(e) => setNewCarrier((x) => ({ ...x, support_phone: e.target.value }))}
+              />
+            </Field>
+
+            <Field label="Logo URL (optional)" className="md:col-span-1">
+              <input
+                className={inputCls}
+                value={newCarrier.logo_url}
+                onChange={(e) => setNewCarrier((x) => ({ ...x, logo_url: e.target.value }))}
+              />
+            </Field>
+
+            <div className="md:col-span-2 flex items-center gap-3">
+              <input
+                id="activeCarrier"
+                type="checkbox"
+                checked={newCarrier.active}
+                onChange={(e) => setNewCarrier((x) => ({ ...x, active: e.target.checked }))}
+              />
+              <label htmlFor="activeCarrier" className="text-sm text-white/80">
+                Active
+              </label>
+            </div>
+          </div>
+
+          <button
+            onClick={createCarrier}
+            disabled={creatingCarrier}
+            className={saveWide + (creatingCarrier ? ' opacity-50 cursor-not-allowed' : '')}
+          >
+            {creatingCarrier ? 'Creating…' : 'Create Carrier'}
+          </button>
+        </Modal>
+      )}
     </div>
   )
 }
 
-/* ---------- UI helpers ---------- */
+/* ---------------- Components ---------------- */
 
-function TabBtn({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  children: React.ReactNode
-}) {
+function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       onClick={onClick}
       className={[
-        'rounded-2xl px-4 py-2 text-sm font-semibold transition',
-        active ? 'bg-white/15' : 'bg-white/5 hover:bg-white/10',
+        'rounded-2xl border px-4 py-2 text-sm font-semibold transition',
+        active ? 'border-white/20 bg-white/10' : 'border-white/10 bg-white/5 hover:bg-white/10',
       ].join(' ')}
+      type="button"
     >
       {children}
     </button>
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+  className,
+}: {
+  label: string
+  children: React.ReactNode
+  className?: string
+}) {
   return (
-    <div>
+    <div className={className || ''}>
       <div className="text-[11px] text-white/55 mb-2">{label}</div>
       {children}
     </div>
   )
 }
 
-/* ---------- styles ---------- */
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-[9999]">
+      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
+      <div className="absolute left-1/2 top-1/2 w-[92vw] max-w-2xl -translate-x-1/2 -translate-y-1/2">
+        <div className="glass rounded-2xl border border-white/10 p-6 shadow-2xl">
+          <div className="flex items-center justify-between gap-3 mb-5">
+            <div className="text-sm font-semibold">{title}</div>
+            <button className={btnGlass} onClick={onClose} type="button">
+              Close
+            </button>
+          </div>
+          {children}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ---------------- Styles ---------------- */
 
 const inputCls =
   'w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-white/20 focus:bg-white/7'
 
-const btnSoft = 'rounded-xl bg-white/10 hover:bg-white/15 transition px-3 py-2 text-xs'
 const btnGlass =
   'rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-4 py-2 text-sm font-semibold'
+
+const btnSoft = 'rounded-xl bg-white/10 hover:bg-white/15 transition px-3 py-2 text-xs'
+
 const saveBtn =
-  'rounded-2xl bg-green-600 hover:bg-green-500 transition px-4 py-2 text-sm font-semibold'
+  'rounded-2xl bg-blue-600 hover:bg-blue-500 transition px-4 py-2 text-sm font-semibold border border-white/10'
+
 const saveWide =
-  'mt-6 w-full rounded-2xl bg-green-600 hover:bg-green-500 transition px-4 py-3 text-sm font-semibold'
+  'mt-5 w-full rounded-2xl bg-blue-600 hover:bg-blue-500 transition px-4 py-3 text-sm font-semibold border border-white/10'
+
 const dangerBtn =
-  'rounded-2xl bg-red-600 hover:bg-red-500 transition px-4 py-2 text-sm font-semibold'
+  'rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-2 text-sm font-semibold hover:bg-red-500/15 transition'
