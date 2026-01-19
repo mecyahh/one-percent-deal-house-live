@@ -370,20 +370,20 @@ export default function SettingsPage() {
       const adv = Number(newCarrier.advance_rate)
       if (!Number.isFinite(adv)) throw new Error('Advance rate invalid')
 
-      const sort = newCarrier.sort_order.trim() ? Number(newCarrier.sort_order.trim()) : null
-      if (newCarrier.sort_order.trim() && !Number.isFinite(sort as any)) throw new Error('Sort order invalid')
+      const sort = newCarrier.sort_order.trim() ? Number(newCarrier.sort_order.trim()) : 999
+if (!Number.isFinite(sort)) throw new Error('Sort order invalid')
 
-      const payload = {
-        name,
-        supported_name: newCarrier.supported_name.trim() || null,
-        advance_rate: adv,
-        active: !!newCarrier.active,
-        sort_order: sort,
-        eapp_url: newCarrier.eapp_url.trim() || null,
-        portal_url: newCarrier.portal_url.trim() || null,
-        support_phone: newCarrier.support_phone.trim() || null,
-        logo_url: newCarrier.logo_url.trim() || null,
-      }
+      cconst payload = {
+  name,
+  supported_name: newCarrier.supported_name.trim() || null,
+  advance_rate: adv,
+  active: !!newCarrier.active,
+  sort_order: sort, // ✅ never null
+  eapp_url: newCarrier.eapp_url.trim() || null,
+  portal_url: newCarrier.portal_url.trim() || null,
+  support_phone: newCarrier.support_phone.trim() || null,
+  logo_url: newCarrier.logo_url.trim() || null,
+}
 
       const { error } = await supabase.from('carriers').insert(payload)
       if (error) throw error
