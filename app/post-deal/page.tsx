@@ -391,12 +391,15 @@ function toMoneyNumber(v: string) {
   return Number.isFinite(num) ? num : NaN
 }
 
-// format to $X,XXX on blur
+ // format to $X,XXX.XX on blur — NO rounding
 function formatMoneyInput(v: string) {
   const n = toMoneyNumber(v)
-  if (!Number.isFinite(n) || n === 0) return v ? '' : ''
-  const whole = Math.round(n)
-  return `$${whole.toLocaleString()}`
+  if (!Number.isFinite(n)) return ''
+
+  return `$${Number(n).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
 }
 
 function buildNote({ product_name, effective_date }: { product_name: string; effective_date: string }) {
