@@ -7,11 +7,12 @@ import { supabase } from '@/lib/supabaseClient'
 type Carrier = {
   id: string
   name: string
-  sort_order: number
-  active: boolean
+  sort_order: number | null
+  active: boolean | null
   eapp_url: string | null
   portal_url: string | null
   support_phone: string | null
+  created_at?: string
 }
 
 type Account = {
@@ -62,83 +63,98 @@ export default function CarrierOutlinePage() {
   >({})
 
   useEffect(() => {
-    load()
+    let alive = true
+    ;(async () => {
+      await load(alive)
+    })()
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  async function load() {
-    setLoading(true)
+  async function load(alive = true) {
+    try {
+      setLoading(true)
+      setToast(null)
 
-    const userRes = await supabase.auth.getUser()
-    const uid = userRes.data.user?.id
-    if (!uid) {
-      setLoading(false)
-      return
-    }
+      const userRes = await supabase.auth.getUser()
+      const uid = userRes.data.user?.id
 
-    const cRes = await supabase
-      .from('carriers')
-      .select('id, name, sort_order, active, eapp_url, portal_url, support_phone')
-      .eq('active', true)
-      .order('sort_order', { ascending: true })
-      .order('name', { ascending: true })
-
-    if (cRes.error) {
-      setToast('Could not load carriers')
-      setLoading(false)
-      return
-    }
-
-    const aRes = await supabase
-      .from('agent_carrier_accounts')
-      .select('id, agent_id, carrier_id, producer_number, username, password, status, updated_at')
-      .eq('agent_id', uid)
-
-    if (aRes.error) {
-      setToast('Could not load your carrier accounts (RLS)')
-      setLoading(false)
-      return
-    }
-
-    const lRes = await supabase
-      .from('agent_licenses')
-      .select('agent_id, npn, resident_license, florida_license')
-      .eq('agent_id', uid)
-      .maybeSingle()
-
-    if (!lRes.error && lRes.data) {
-      const l = lRes.data as Licenses
-      setNpn(l.npn || '')
-      setResidentLicense(l.resident_license || '')
-      setFloridaLicense(l.florida_license || '')
-    }
-
-    const carrierList = (cRes.data || []) as Carrier[]
-    const accList = (aRes.data || []) as Account[]
-
-    const accMap: Record<string, Account> = {}
-    for (const a of accList) accMap[a.carrier_id] = a
-
-    const d: typeof draft = {}
-    for (const c of carrierList) {
-      const existing = accMap[c.id]
-      d[c.id] = {
-        producer_number: existing?.producer_number || '',
-        username: existing?.username || '',
-        password: existing?.password || '',
-        status: (existing?.status as any) || 'active',
+      // ✅ IMPORTANT: don't hang the page if auth missing
+      if (!uid) {
+        window.location.href = '/login'
+        return
       }
-    }
 
-    setCarriers(carrierList)
-    setAccounts(accMap)
-    setDraft(d)
-    setLoading(false)
+      const cRes = await supabase
+        .from('carriers')
+        .select('id, name, sort_order, active, eapp_url, portal_url, support_phone, created_at')
+        .eq('active', true)
+        .order('sort_order', { ascending: true, nullsFirst: false })
+        .order('name', { ascending: true })
+        .limit(5000)
+
+      if (cRes.error) throw new Error(`Could not load carriers: ${cRes.error.message}`)
+
+      const aRes = await supabase
+        .from('agent_carrier_accounts')
+        .select('id, agent_id, carrier_id, producer_number, username, password, status, updated_at')
+        .eq('agent_id', uid)
+        .limit(5000)
+
+      if (aRes.error) throw new Error(`Could not load your carrier accounts (RLS): ${aRes.error.message}`)
+
+      const lRes = await supabase
+        .from('agent_licenses')
+        .select('agent_id, npn, resident_license, florida_license')
+        .eq('agent_id', uid)
+        .maybeSingle()
+
+      // licenses are optional; don't fail page on license read
+      const lic = !lRes.error ? (lRes.data as Licenses | null) : null
+
+      const carrierList = (cRes.data || []) as Carrier[]
+      const accList = (aRes.data || []) as Account[]
+
+      const accMap: Record<string, Account> = {}
+      for (const a of accList) accMap[a.carrier_id] = a
+
+      const d: typeof draft = {}
+      for (const c of carrierList) {
+        const existing = accMap[c.id]
+        d[c.id] = {
+          producer_number: existing?.producer_number || '',
+          username: existing?.username || '',
+          password: existing?.password || '',
+          status: ((existing?.status as any) || 'active') as any,
+        }
+      }
+
+      if (!alive) return
+
+      if (lic) {
+        setNpn(lic.npn || '')
+        setResidentLicense(lic.resident_license || '')
+        setFloridaLicense(lic.florida_license || '')
+      } else {
+        // keep whatever is currently typed
+      }
+
+      setCarriers(carrierList)
+      setAccounts(accMap)
+      setDraft(d)
+      setLoading(false)
+    } catch (e: any) {
+      setLoading(false)
+      setToast(e?.message || 'Carrier Outline failed to load')
+    }
   }
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return carriers
-    return carriers.filter((c) => c.name.toLowerCase().includes(q))
+    return carriers.filter((c) => (c.name || '').toLowerCase().includes(q))
   }, [carriers, search])
 
   function setField(carrierId: string, field: keyof (typeof draft)[string], value: any) {
@@ -150,82 +166,87 @@ export default function CarrierOutlinePage() {
 
   async function saveLicenses() {
     setSavingLicenses(true)
+    try {
+      const userRes = await supabase.auth.getUser()
+      const uid = userRes.data.user?.id
+      if (!uid) {
+        window.location.href = '/login'
+        return
+      }
 
-    const userRes = await supabase.auth.getUser()
-    const uid = userRes.data.user?.id
-    if (!uid) {
+      const payload = {
+        agent_id: uid,
+        npn: npn.trim() || null,
+        resident_license: residentLicense.trim() || null,
+        florida_license: floridaLicense.trim() || null,
+      }
+
+      const res = await supabase.from('agent_licenses').upsert(payload, { onConflict: 'agent_id' })
+      if (res.error) throw new Error(res.error.message)
+
+      setToast('Saved ✅')
+    } catch (e: any) {
+      setToast(e?.message || 'Could not save licenses')
+    } finally {
       setSavingLicenses(false)
-      return
     }
-
-    const payload = {
-      agent_id: uid,
-      npn: npn.trim() || null,
-      resident_license: residentLicense.trim() || null,
-      florida_license: floridaLicense.trim() || null,
-    }
-
-    const res = await supabase.from('agent_licenses').upsert(payload, { onConflict: 'agent_id' })
-
-    if (res.error) {
-      setToast('Could not save licenses')
-      setSavingLicenses(false)
-      return
-    }
-
-    setToast('Saved ✅')
-    setSavingLicenses(false)
   }
 
   async function saveCarrier(carrierId: string) {
     setSavingCarrier(carrierId)
+    try {
+      const userRes = await supabase.auth.getUser()
+      const uid = userRes.data.user?.id
+      if (!uid) {
+        window.location.href = '/login'
+        return
+      }
 
-    const userRes = await supabase.auth.getUser()
-    const uid = userRes.data.user?.id
-    if (!uid) {
+      const d = draft[carrierId]
+      const payload = {
+        agent_id: uid,
+        carrier_id: carrierId,
+        producer_number: d.producer_number.trim() || null,
+        username: d.username.trim() || null,
+        password: d.password.trim() || null,
+        status: d.status,
+      }
+
+      const existing = accounts[carrierId]
+      const res = existing?.id
+        ? await supabase.from('agent_carrier_accounts').update(payload).eq('id', existing.id)
+        : await supabase.from('agent_carrier_accounts').insert(payload)
+
+      if (res.error) throw new Error(res.error.message)
+
+      setToast('Saved ✅')
+      await load(true)
+    } catch (e: any) {
+      setToast(e?.message || 'Save failed')
+    } finally {
       setSavingCarrier(null)
-      return
     }
-
-    const d = draft[carrierId]
-    const payload = {
-      agent_id: uid,
-      carrier_id: carrierId,
-      producer_number: d.producer_number.trim() || null,
-      username: d.username.trim() || null,
-      password: d.password.trim() || null,
-      status: d.status,
-    }
-
-    const existing = accounts[carrierId]
-    const res = existing?.id
-      ? await supabase.from('agent_carrier_accounts').update(payload).eq('id', existing.id)
-      : await supabase.from('agent_carrier_accounts').insert(payload)
-
-    if (res.error) {
-      setToast('Save failed')
-      setSavingCarrier(null)
-      return
-    }
-
-    setToast('Saved ✅')
-    setSavingCarrier(null)
-    await load()
   }
 
   async function clearCarrier(carrierId: string) {
-    const existing = accounts[carrierId]
-    if (!existing?.id) {
-      setField(carrierId, 'producer_number', '')
-      setField(carrierId, 'username', '')
-      setField(carrierId, 'password', '')
-      setField(carrierId, 'status', 'active')
-      return
-    }
+    try {
+      const existing = accounts[carrierId]
+      if (!existing?.id) {
+        setField(carrierId, 'producer_number', '')
+        setField(carrierId, 'username', '')
+        setField(carrierId, 'password', '')
+        setField(carrierId, 'status', 'active')
+        return
+      }
 
-    await supabase.from('agent_carrier_accounts').delete().eq('id', existing.id)
-    setToast('Cleared ✅')
-    await load()
+      const res = await supabase.from('agent_carrier_accounts').delete().eq('id', existing.id)
+      if (res.error) throw new Error(res.error.message)
+
+      setToast('Cleared ✅')
+      await load(true)
+    } catch (e: any) {
+      setToast(e?.message || 'Clear failed')
+    }
   }
 
   return (
@@ -274,7 +295,7 @@ export default function CarrierOutlinePage() {
               {showPasswords ? 'Hide Passwords' : 'Show Passwords'}
             </button>
 
-            <button onClick={load} className={btnGlass}>
+            <button onClick={() => load(true)} className={btnGlass}>
               Refresh
             </button>
           </div>
@@ -354,11 +375,7 @@ export default function CarrierOutlinePage() {
                     </Field>
 
                     <Field label="Status">
-                      <select
-                        className={inputCls}
-                        value={d?.status || 'active'}
-                        onChange={(e) => setField(c.id, 'status', e.target.value)}
-                      >
+                      <select className={inputCls} value={d?.status || 'active'} onChange={(e) => setField(c.id, 'status', e.target.value)}>
                         <option value="active">Active</option>
                         <option value="pending">Pending</option>
                         <option value="inactive">Inactive</option>
@@ -391,9 +408,7 @@ export default function CarrierOutlinePage() {
                       <LinkCard label="E-App" href={c.eapp_url} />
                       <LinkCard label="Agent Portal" href={c.portal_url} />
                     </div>
-                    <div className="mt-3 text-center text-sm text-white/80">
-                      {c.support_phone ? c.support_phone : '—'}
-                    </div>
+                    <div className="mt-3 text-center text-sm text-white/80">{c.support_phone ? c.support_phone : '—'}</div>
                   </div>
 
                   <button
@@ -406,6 +421,12 @@ export default function CarrierOutlinePage() {
                 </div>
               )
             })}
+
+            {filtered.length === 0 && (
+              <div className="text-sm text-white/60">
+                No carriers match “{search.trim()}”.
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -433,10 +454,12 @@ function StatusPill({ status }: { status: string }) {
 }
 
 function LinkCard({ label, href }: { label: string; href: string | null }) {
-  const disabled = !href
+  const cleaned = (href || '').trim()
+  const disabled = !cleaned
+
   return (
     <a
-      href={href || '#'}
+      href={disabled ? '#' : cleaned}
       target="_blank"
       rel="noreferrer"
       className={[
@@ -456,4 +479,5 @@ const inputCls =
   'w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-white/20 focus:bg-white/7'
 const btnGlass = 'glass px-4 py-2 text-sm font-medium hover:bg-white/10 transition rounded-2xl border border-white/10'
 const btnSoft = 'rounded-xl bg-white/10 hover:bg-white/15 transition px-3 py-2 text-xs'
-const btnDanger = 'rounded-2xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs hover:bg-red-500/15 transition'
+const btnDanger =
+  'rounded-2xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs hover:bg-red-500/15 transition'
