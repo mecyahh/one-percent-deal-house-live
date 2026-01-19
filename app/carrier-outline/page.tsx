@@ -12,7 +12,6 @@ type Carrier = {
   eapp_url: string | null
   portal_url: string | null
   support_phone: string | null
-  created_at?: string
 }
 
 type Account = {
@@ -31,6 +30,52 @@ type Licenses = {
   npn: string | null
   resident_license: string | null
   florida_license: string | null
+}
+
+// ✅ FALLBACK LINKS (if DB fields are null)
+const CARRIER_FALLBACKS: Record<
+  string,
+  { eapp_url: string; portal_url: string; support_phone: string }
+> = {
+  Aetna: {
+    eapp_url:
+      'https://www.aetna.com/aimmanageaccount/login?identityTransaction=t13%2Ba1aJXqkNmE71XgKjOqjV36ynh%2FoXVgtzAfDFlZSv8UHvqfKyV%2FHC5MFnx%2B%2F9oGOoUr8fJYaTxzLNDRU8AeTUMwDdO802qgyvz8XeOlaVL1I5jUg2Tv1f0%2FG4qdYf%2F6kYfN0O1kttxLLCnWCFsIvEGkcxNqHX%2BEbcbyydLwMM2eNb2JyxeUCK3mVaDrBzqQnEL8wDWUPUsnuJg9bzZBQVK4NhZUahh9H6Nnp%2B4wF3c5HWvBoTUwZEaCGgvKkmiKUplTTrxC2FVjDf8RnuwfuPG4CrlaETukIZDeoMj7Kvewx%2BbnLQye55QI7Yk1oXVCokQZcwL1%2BaKHnuCJoNK%2FK5DceKwfp%2FPtuCH6Uq%2FLQIqAJVRcDsCChEPIzFJPqYiUkAf8xfer9fFNrf2GasjrRW%2Bdg9pK2qeEbtUUL5FTDEwkDFlybpxYV%2FG%2BSX44cb3MnVXkgLQ4%2BnfSMp7uvruLcQnQmeuhx4oAXvCJLILltNOy1dL%2Fz0GgmvVcYgqn3pEcqO%2B0dKe4sQpq0IPPIlXJV2lkDLw%2BEQvxoqxz6KxUdMaTzTMMmmeRWzJAd18I5X1g4zHO21bSFlT%2BHWURyoh45%2FPgYZNwLjpBq2VTyf2QY9OIEwpoSt1QsPziGxjpGHVLmyDtEYdhc1Y8TNt2JjEQ%3D%3D&appname=SSIBroker&branding=aetna&skin=&language=&channel=web&psuid=&biometric_text=&businessdata=channel~aetna|subchannel~broker&business_event=Login',
+    portal_url:
+      'https://www.aetna.com/aimmanageaccount/login?identityTransaction=t13%2Ba1aJXqkNmE71XgKjOqjV36ynh%2FoXVgtzAfDFlZSv8UHvqfKyV%2FHC5MFnx%2B%2F9oGOoUr8fJYaTxzLNDRU8AeTUMwDdO802qgyvz8XeOlaVL1I5jUg2Tv1f0%2FG4qdYf%2F6kYfN0O1kttxLLCnWCFsIvEGkcxNqHX%2BEbcbyydLwMM2eNb2JyxeUCK3mVaDrBzqQnEL8wDWUPUsnuJg9bzZBQVK4NhZUahh9H6Nnp%2B4wF3c5HWvBoTUwZEaCGgvKkmiKUplTTrxC2FVjDf8RnuwfuPG4CrlaETukIZDeoMj7Kvewx%2BbnLQye55QI7Yk1oXVCokQZcwL1%2BaKHnuCJoNK%2FK5DceKwfp%2FPtuCH6Uq%2FLQIqAJVRcDsCChEPIzFJPqYiUkAf8xfer9fFNrf2GasjrRW%2Bdg9pK2qeEbtUUL5FTDEwkDFlybpxYV%2FG%2BSX44cb3MnVXkgLQ4%2BnfSMp7uvruLcQnQmeuhx4oAXvCJLILltNOy1dL%2Fz0GgmvVcYgqn3pEcqO%2B0dKe4sQpq0IPPIlXJV2lkDLw%2BEQvxoqxz6KxUdMaTzTMMmmeRWzJAd18I5X1g4zHO21bSFlT%2BHWURyoh45%2FPgYZNwLjpBq2VTyf2QY9OIEwpoSt1QsPziGxjpGHVLmyDtEYdhc1Y8TNt2JjEQ%3D%3D&appname=SSIBroker&branding=aetna&skin=&language=&channel=web&psuid=&biometric_text=&businessdata=channel~aetna|subchannel~broker&business_event=Login',
+    support_phone: '(866) 272-6630',
+  },
+  Aflac: {
+    eapp_url:
+      'https://www.aetnaseniorproducts.com/ssibrokerwebsecure/afl/login.fcc?TYPE=33554433&REALMOID=06-ff4bb4c5-301d-4181-bd7a-b75398c8cb44&GUID=&SMAUTHREASON=0&METHOD=GET&SMAGENTNAME=-SM-s7pFJAUCnH5Qp3pzu1lx8MibbZnWT%2b01G%2f6iCkHVxMsS0hd%2fsbmjhWe16MOGqvFRrS17O3IrRUBJqyBYHEvE5IyHDS9KZnck&TARGET=-SM-HTTPS%3a%2f%2fwww%2eaetnaseniorproducts%2ecom%2fssibrokerwebsecure%2fafl%2fhome%2ehtml',
+    portal_url:
+      'https://www.aetnaseniorproducts.com/ssibrokerwebsecure/afl/login.fcc?TYPE=33554433&REALMOID=06-ff4bb4c5-301d-4181-bd7a-b75398c8cb44&GUID=&SMAUTHREASON=0&METHOD=GET&SMAGENTNAME=-SM-s7pFJAUCnH5Qp3pzu1lx8MibbZnWT%2b01G%2f6iCkHVxMsS0hd%2fsbmjhWe16MOGqvFRrS17O3IrRUBJqyBYHEvE5IyHDS9KZnck&TARGET=-SM-HTTPS%3a%2f%2fwww%2eaetnaseniorproducts%2ecom%2fssibrokerwebsecure%2fafl%2fhome%2ehtml',
+    support_phone: '(833) 504-0336',
+  },
+  Transamerica: {
+    eapp_url: 'https://secure.transamerica.com/login/sign-in/login.html?TAM_OP=login',
+    portal_url: 'https://secure.transamerica.com/login/sign-in/login.html?TAM_OP=login',
+    support_phone: '(800) 797-2643',
+  },
+  'American Amicable': {
+    eapp_url: 'https://www.insuranceapplication.com/AppPage/index.html',
+    portal_url: 'https://www.americanamicable.com/v4/AgentLogin.php',
+    support_phone: '(800) 736-7311',
+  },
+  'Mutual of Omaha': {
+    eapp_url: 'https://accounts.mutualofomaha.com/samlAuthnRequest',
+    portal_url: 'https://accounts.mutualofomaha.com/samlAuthnRequest',
+    support_phone: '(800) 693-6083',
+  },
+  'Royal Neighbors': {
+    eapp_url: 'https://agent.royalneighbors.org/login',
+    portal_url: 'https://agent.royalneighbors.org/login',
+    support_phone: '(800) 770-4561',
+  },
+}
+
+function pickFallback(name: string) {
+  const key = name.trim()
+  return CARRIER_FALLBACKS[key] || null
 }
 
 export default function CarrierOutlinePage() {
@@ -80,20 +125,18 @@ export default function CarrierOutlinePage() {
 
       const userRes = await supabase.auth.getUser()
       const uid = userRes.data.user?.id
-
-      // ✅ IMPORTANT: don't hang the page if auth missing
       if (!uid) {
+        setLoading(false)
         window.location.href = '/login'
         return
       }
 
       const cRes = await supabase
         .from('carriers')
-        .select('id, name, sort_order, active, eapp_url, portal_url, support_phone, created_at')
+        .select('id, name, sort_order, active, eapp_url, portal_url, support_phone')
         .eq('active', true)
         .order('sort_order', { ascending: true, nullsFirst: false })
         .order('name', { ascending: true })
-        .limit(5000)
 
       if (cRes.error) throw new Error(`Could not load carriers: ${cRes.error.message}`)
 
@@ -101,7 +144,6 @@ export default function CarrierOutlinePage() {
         .from('agent_carrier_accounts')
         .select('id, agent_id, carrier_id, producer_number, username, password, status, updated_at')
         .eq('agent_id', uid)
-        .limit(5000)
 
       if (aRes.error) throw new Error(`Could not load your carrier accounts (RLS): ${aRes.error.message}`)
 
@@ -111,8 +153,12 @@ export default function CarrierOutlinePage() {
         .eq('agent_id', uid)
         .maybeSingle()
 
-      // licenses are optional; don't fail page on license read
-      const lic = !lRes.error ? (lRes.data as Licenses | null) : null
+      if (!lRes.error && lRes.data) {
+        const l = lRes.data as Licenses
+        setNpn(l.npn || '')
+        setResidentLicense(l.resident_license || '')
+        setFloridaLicense(l.florida_license || '')
+      }
 
       const carrierList = (cRes.data || []) as Carrier[]
       const accList = (aRes.data || []) as Account[]
@@ -127,27 +173,21 @@ export default function CarrierOutlinePage() {
           producer_number: existing?.producer_number || '',
           username: existing?.username || '',
           password: existing?.password || '',
-          status: ((existing?.status as any) || 'active') as any,
+          status: (existing?.status as any) || 'active',
         }
       }
 
       if (!alive) return
-
-      if (lic) {
-        setNpn(lic.npn || '')
-        setResidentLicense(lic.resident_license || '')
-        setFloridaLicense(lic.florida_license || '')
-      } else {
-        // keep whatever is currently typed
-      }
-
       setCarriers(carrierList)
       setAccounts(accMap)
       setDraft(d)
-      setLoading(false)
     } catch (e: any) {
+      setToast(e?.message || 'Load failed')
+      setCarriers([])
+      setAccounts({})
+      setDraft({})
+    } finally {
       setLoading(false)
-      setToast(e?.message || 'Carrier Outline failed to load')
     }
   }
 
@@ -166,10 +206,12 @@ export default function CarrierOutlinePage() {
 
   async function saveLicenses() {
     setSavingLicenses(true)
+
     try {
       const userRes = await supabase.auth.getUser()
       const uid = userRes.data.user?.id
       if (!uid) {
+        setSavingLicenses(false)
         window.location.href = '/login'
         return
       }
@@ -194,10 +236,12 @@ export default function CarrierOutlinePage() {
 
   async function saveCarrier(carrierId: string) {
     setSavingCarrier(carrierId)
+
     try {
       const userRes = await supabase.auth.getUser()
       const uid = userRes.data.user?.id
       if (!uid) {
+        setSavingCarrier(null)
         window.location.href = '/login'
         return
       }
@@ -345,6 +389,12 @@ export default function CarrierOutlinePage() {
               const has = !!accounts[c.id]
               const isSaving = savingCarrier === c.id
 
+              // ✅ DB links first, fallback if missing
+              const fb = pickFallback(c.name)
+              const eapp = (c.eapp_url || fb?.eapp_url || null) as string | null
+              const portal = (c.portal_url || fb?.portal_url || null) as string | null
+              const phone = (c.support_phone || fb?.support_phone || null) as string | null
+
               return (
                 <div key={c.id} className="glass rounded-2xl border border-white/10 p-6">
                   <div className="flex items-start justify-between gap-4 mb-4">
@@ -375,7 +425,11 @@ export default function CarrierOutlinePage() {
                     </Field>
 
                     <Field label="Status">
-                      <select className={inputCls} value={d?.status || 'active'} onChange={(e) => setField(c.id, 'status', e.target.value)}>
+                      <select
+                        className={inputCls}
+                        value={d?.status || 'active'}
+                        onChange={(e) => setField(c.id, 'status', e.target.value)}
+                      >
                         <option value="active">Active</option>
                         <option value="pending">Pending</option>
                         <option value="inactive">Inactive</option>
@@ -405,10 +459,10 @@ export default function CarrierOutlinePage() {
                   {/* E-App | Agent Portal, Phone below */}
                   <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <LinkCard label="E-App" href={c.eapp_url} />
-                      <LinkCard label="Agent Portal" href={c.portal_url} />
+                      <LinkCard label="E-App" href={eapp} />
+                      <LinkCard label="Agent Portal" href={portal} />
                     </div>
-                    <div className="mt-3 text-center text-sm text-white/80">{c.support_phone ? c.support_phone : '—'}</div>
+                    <div className="mt-3 text-center text-sm text-white/80">{phone ? phone : '—'}</div>
                   </div>
 
                   <button
@@ -421,12 +475,6 @@ export default function CarrierOutlinePage() {
                 </div>
               )
             })}
-
-            {filtered.length === 0 && (
-              <div className="text-sm text-white/60">
-                No carriers match “{search.trim()}”.
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -454,12 +502,10 @@ function StatusPill({ status }: { status: string }) {
 }
 
 function LinkCard({ label, href }: { label: string; href: string | null }) {
-  const cleaned = (href || '').trim()
-  const disabled = !cleaned
-
+  const disabled = !href
   return (
     <a
-      href={disabled ? '#' : cleaned}
+      href={href || '#'}
       target="_blank"
       rel="noreferrer"
       className={[
@@ -479,5 +525,4 @@ const inputCls =
   'w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none focus:border-white/20 focus:bg-white/7'
 const btnGlass = 'glass px-4 py-2 text-sm font-medium hover:bg-white/10 transition rounded-2xl border border-white/10'
 const btnSoft = 'rounded-xl bg-white/10 hover:bg-white/15 transition px-3 py-2 text-xs'
-const btnDanger =
-  'rounded-2xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs hover:bg-red-500/15 transition'
+const btnDanger = 'rounded-2xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs hover:bg-red-500/15 transition'
