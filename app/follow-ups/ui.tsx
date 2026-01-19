@@ -74,11 +74,11 @@ export default function FollowUpsClient() {
       .order('follow_up_at', { ascending: true })
       .limit(3000)
 
-    if (error) {
-      setToast('Could not load follow ups (RLS)')
-      setLoading(false)
-      return
-    }
+   if (error) {
+  setToast(`Could not load follow ups: ${error.message}`)
+  setLoading(false)
+  return
+}
 
     setRows((data || []) as FollowUp[])
     setLoading(false)
@@ -211,7 +211,7 @@ export default function FollowUpsClient() {
               </Field>
 
               <Field label="Phone">
-                <input className={inputCls} value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="(888) 888-8888" />
+                <input className={inputCls} value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: cleanPhone(e.target.value) || '' }))} placeholder="(888) 888-8888" />
               </Field>
 
               <Field label="Client DOB">
