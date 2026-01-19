@@ -503,12 +503,13 @@ export default function SettingsPage() {
             </div>
 
             <div className="rounded-2xl border border-white/10 overflow-hidden">
-              <div className="grid grid-cols-12 px-4 py-3 border-b border-white/10 text-[11px] text-white/60 bg-white/5">
-                <div className="col-span-4">Agent</div>
-                <div className="col-span-4">Email</div>
-                <div className="col-span-2 text-center">Role</div>
-                <div className="col-span-2 text-right">Comp</div>
-              </div>
+             <div className="grid grid-cols-12 px-4 py-3 border-b border-white/10 text-[11px] text-white/60 bg-white/5">
+  <div className="col-span-3">Agent</div>
+  <div className="col-span-4">Email</div>
+  <div className="col-span-2 text-center">Role</div>
+  <div className="col-span-2 text-right">Comp</div>
+  <div className="col-span-1 text-right">Actions</div>
+</div>
 
               {loadingAgents && <div className="px-4 py-6 text-sm text-white/60">Loading…</div>}
 
@@ -516,26 +517,64 @@ export default function SettingsPage() {
                 filteredAgents.map((a) => {
                   const name = `${a.first_name || '—'} ${a.last_name || ''}`.trim()
                   return (
-                    <div key={a.id} className="grid grid-cols-12 px-4 py-3 border-b border-white/10 text-sm">
-                      <div className="col-span-4 font-semibold">
-                        {name}
-                        {a.is_agency_owner ? (
-                          <span className="ml-2 text-[10px] px-2 py-1 rounded-xl border bg-white/5 border-white/10 text-white/70">
-                            Owner
-                          </span>
-                        ) : null}
-                        {a.role === 'admin' ? (
-                          <span className="ml-2 text-[10px] px-2 py-1 rounded-xl border bg-white/5 border-white/10 text-white/70">
-                            Admin
-                          </span>
-                        ) : null}
-                      </div>
-                      <div className="col-span-4 text-white/75">{a.email || '—'}</div>
-                      <div className="col-span-2 text-center text-white/70">{a.role || 'agent'}</div>
-                      <div className="col-span-2 text-right text-white/80">
-                        {typeof a.comp === 'number' ? `${a.comp}%` : '—'}
-                      </div>
-                    </div>
+                   <div key={a.id} className="grid grid-cols-12 px-4 py-3 border-b border-white/10 text-sm items-center">
+  <div className="col-span-3 font-semibold">
+    {name}
+    {a.is_agency_owner ? (
+      <span className="ml-2 text-[10px] px-2 py-1 rounded-xl border bg-white/5 border-white/10 text-white/70">
+        Owner
+      </span>
+    ) : null}
+    {a.role === 'admin' ? (
+      <span className="ml-2 text-[10px] px-2 py-1 rounded-xl border bg-white/5 border-white/10 text-white/70">
+        Admin
+      </span>
+    ) : null}
+  </div>
+
+  <div className="col-span-4 text-white/75">{a.email || '—'}</div>
+  <div className="col-span-2 text-center text-white/70">{a.role || 'agent'}</div>
+  <div className="col-span-2 text-right text-white/80">
+    {typeof a.comp === 'number' ? `${a.comp}%` : '—'}
+  </div>
+
+  <div className="col-span-1 flex justify-end gap-2">
+    {/* ✏️ Edit */}
+    <button
+      type="button"
+      onClick={() => {
+        setToast('Edit UI next (we’ll add modal + save route)')
+      }}
+      className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-2 py-2"
+      title="Edit"
+    >
+      ✏️
+    </button>
+
+    {/* 🗑 Delete */}
+    <button
+      type="button"
+      onClick={async () => {
+        const ok = window.confirm(`Delete ${name}? This removes Auth + Profile.`)
+        if (!ok) return
+        const token = await authHeader()
+        const res = await fetch('/api/admin/users/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: token },
+          body: JSON.stringify({ user_id: a.id }),
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) return setToast(json.error || 'Delete failed')
+        setToast('User deleted ✅')
+        loadAgents()
+      }}
+      className="rounded-xl border border-white/10 bg-white/5 hover:bg-red-600/30 transition px-2 py-2"
+      title="Delete"
+    >
+      🗑
+    </button>
+  </div>
+</div>
                   )
                 })}
 
