@@ -298,7 +298,7 @@ const dailyPremiumByUser = useMemo(() => {
           </div>
         </div>
 
-        <div className="mt-3 text-[11px] text-white/45">Sundays show “--”. All other days: 0 = bold red, production = green.</div>
+        <div className="mt-3 text-[11px] text-white/45">Go Close..</div>
       </div>
     </div>
   )
