@@ -350,9 +350,7 @@ export default function PostDealPage() {
                 {saving ? 'Submitting…' : 'Submit Deal'}
               </button>
 
-              <div className="mt-3 text-[11px] text-white/50">
-                Phone auto-formats. Coverage/Premium auto-format. Product disabled until carrier selected.
-              </div>
+              
             </div>
           )}
         </div>
