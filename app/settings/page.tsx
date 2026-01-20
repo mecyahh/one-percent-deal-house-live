@@ -129,369 +129,430 @@ export default function SettingsPage() {
   })
   const [savingPosition, setSavingPosition] = useState(false)
 
-  // Carriers
-  const [loadingCarriers, setLoadingCarriers] = useState(false)
-  const [refreshingCarriers, setRefreshingCarriers] = useState(false)
-  const [carriers, setCarriers] = useState<CarrierRow[]>([])
-  const [carrierSearch, setCarrierSearch] = useState('')
-  const [createOpen, setCreateOpen] = useState(false)
-  const [creatingCarrier, setCreatingCarrier] = useState(false)
+// ✅ DROP-IN REPLACEMENT: replace ONLY your "Carriers" tab UI block in /app/settings/page.tsx
+// This restores: Carrier | Supported Name | Advance | Sort | Products | Actions (✏️ 🗑)
+// and adds: edit carrier modal + products modal + create carrier modal (same glass UI)
 
-  const [newCarrier, setNewCarrier] = useState({
-    name: '',
-    supported_name: '',
-    advance_rate: '0.75',
-    sort_order: '', // REQUIRED in DB (not-null)
-    active: true,
-    eapp_url: '',
-    portal_url: '',
-    support_phone: '',
-    logo_url: '',
-  })
+// 1) Make sure your CarrierRow type includes these fields:
+type CarrierRow = {
+  id: string
+  created_at: string
+  name: string
+  supported_name: string | null
+  advance_rate: number
+  active: boolean
+  sort_order: number
+  eapp_url: string | null
+  portal_url: string | null
+  support_phone: string | null
+  logo_url: string | null
+}
 
-  const isAdmin = me?.role === 'admin'
-  const isOwner = !!me?.is_agency_owner
-  const canManageAgents = isAdmin || isOwner
+// 2) ADD this ProductRow type near the top:
+type ProductRow = {
+  id: string
+  carrier_id: string
+  product_name: string
+  sort_order: number | null
+  is_active: boolean | null
+}
 
-  useEffect(() => {
-    boot()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+// 3) ADD these state hooks near your other Carriers state:
+const [productsOpen, setProductsOpen] = useState(false)
+const [productsLoading, setProductsLoading] = useState(false)
+const [productsSaving, setProductsSaving] = useState(false)
+const [productsCarrier, setProductsCarrier] = useState<CarrierRow | null>(null)
+const [products, setProducts] = useState<ProductRow[]>([])
+const [newProduct, setNewProduct] = useState({ product_name: '', sort_order: '' })
 
-  async function boot() {
-    setBooting(true)
-    setToast(null)
-    try {
-      const { data: userRes, error: userErr } = await supabase.auth.getUser()
-      if (userErr) throw userErr
-      const uid = userRes.user?.id
-      if (!uid) {
-        window.location.href = '/login'
-        return
-      }
+const [carrierEditOpen, setCarrierEditOpen] = useState(false)
+const [carrierEditSaving, setCarrierEditSaving] = useState(false)
+const [carrierEditTarget, setCarrierEditTarget] = useState<CarrierRow | null>(null)
+const [carrierEdit, setCarrierEdit] = useState({
+  name: '',
+  supported_name: '',
+  advance_rate: '0.75',
+  sort_order: '',
+  active: true,
+})
 
-      const { data: prof, error: profErr } = await supabase
-        .from('profiles')
-        .select('id,created_at,email,first_name,last_name,role,is_agency_owner,upline_id,comp,theme,avatar_url')
-        .eq('id', uid)
-        .single()
+// 4) ADD these helpers/functions inside SettingsPage():
 
-      if (profErr) throw profErr
-      const p = prof as Profile
-      setMe(p)
+function openCarrierEdit(c: CarrierRow) {
+  setCarrierEditTarget(c)
+  setCarrierEdit({
+    name: c.name || '',
+    supported_name: c.supported_name || '',
+    advance_rate: String(c.advance_rate ?? 0.75),
+    sort_order: String(c.sort_order ?? 999),
+    active: !!c.active,
+  })
+  setCarrierEditOpen(true)
+}
 
-      setPFirst(p.first_name || '')
-      setPLast(p.last_name || '')
-      setPEmail(p.email || '')
-      setPTheme(p.theme || 'blue')
-      setAvatarPreview(p.avatar_url || '')
+async function saveCarrierEdit() {
+  if (!carrierEditTarget) return
+  await run(setCarrierEditSaving, setToast, 'Carrier updated', async () => {
+    const name = carrierEdit.name.trim()
+    if (!name) throw new Error('Carrier name required')
 
-      const canAgents = p.role === 'admin' || !!p.is_agency_owner
-      if (canAgents) {
-        await loadAgents()
-        setTab('agents')
-      } else {
-        setTab('profile')
-      }
+    const adv = Number(carrierEdit.advance_rate)
+    if (!Number.isFinite(adv) || adv <= 0) throw new Error('Advance rate invalid')
 
-      if (p.role === 'admin') {
-        await loadCarriers()
-      }
-    } catch (e: any) {
-      setToast(`Boot failed: ${errMsg(e)}`)
-    } finally {
-      setBooting(false)
-    }
-  }
+    const sort = carrierEdit.sort_order.trim() ? Number(carrierEdit.sort_order.trim()) : 999
+    if (!Number.isFinite(sort)) throw new Error('Sort order invalid')
 
-  async function authHeader() {
-    const { data } = await supabase.auth.getSession()
-    const token = data.session?.access_token
-    return token ? `Bearer ${token}` : ''
-  }
+    const payload = {
+      name,
+      supported_name: carrierEdit.supported_name.trim() || null,
+      advance_rate: adv,
+      sort_order: sort,
+      active: !!carrierEdit.active,
+    }
 
-  async function logout() {
-    await supabase.auth.signOut()
-    window.location.href = '/login'
-  }
+    const { error } = await supabase.from('carriers').update(payload).eq('id', carrierEditTarget.id)
+    if (error) throw error
 
-  async function saveProfile() {
-    if (!me) return
-    await run(setSavingProfile, setToast, 'Profile saved', async () => {
-      const payload = {
-        first_name: pFirst.trim() || null,
-        last_name: pLast.trim() || null,
-        email: pEmail.trim() || null,
-        theme: pTheme || 'blue',
-        avatar_url: avatarPreview?.trim() || null,
-      }
-      const { error } = await supabase.from('profiles').update(payload).eq('id', me.id)
-      if (error) throw error
+    setCarrierEditOpen(false)
+    setCarrierEditTarget(null)
+    await loadCarriers()
+  })
+}
 
-      // ThemeProvider will see this new value on refresh
-      await boot()
-    })
-  }
+async function deleteCarrier(c: CarrierRow) {
+  const ok = window.confirm(`Delete carrier "${c.name}"? This will also remove its products.`)
+  if (!ok) return
 
-  async function uploadAvatar(file: File) {
-    if (!me) return
-    await run(setUploadingAvatar, setToast, 'Avatar updated', async () => {
-      const ext = file.name.split('.').pop() || 'png'
-      const path = `${me.id}.${ext}`
+  await run(setRefreshingCarriers, setToast, 'Carrier deleted', async () => {
+    // remove products first (safe)
+    await supabase.from('carrier_products').delete().eq('carrier_id', c.id)
+    const { error } = await supabase.from('carriers').delete().eq('id', c.id)
+    if (error) throw error
+    await loadCarriers()
+  })
+}
 
-      const { error: uploadError } = await supabase.storage.from('avatars').upload(path, file, { upsert: true })
-      if (uploadError) throw uploadError
+async function openProducts(c: CarrierRow) {
+  setProductsCarrier(c)
+  setProductsOpen(true)
+  setProductsLoading(true)
+  setProducts([])
+  try {
+    const { data, error } = await supabase
+      .from('carrier_products')
+      .select('id,carrier_id,product_name,sort_order,is_active')
+      .eq('carrier_id', c.id)
+      .order('sort_order', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: true })
+      .limit(5000)
 
-      const { data } = supabase.storage.from('avatars').getPublicUrl(path)
-      const url = data.publicUrl
+    if (error) throw error
+    setProducts((data || []) as ProductRow[])
+  } catch (e: any) {
+    setToast(`Could not load products: ${errMsg(e)}`)
+    setProducts([])
+  } finally {
+    setProductsLoading(false)
+  }
+}
 
-      const { error: upErr } = await supabase.from('profiles').update({ avatar_url: url }).eq('id', me.id)
-      if (upErr) throw upErr
+async function addProduct() {
+  if (!productsCarrier) return
+  await run(setProductsSaving, setToast, 'Product added', async () => {
+    const name = newProduct.product_name.trim()
+    if (!name) throw new Error('Product name required')
 
-      setAvatarPreview(url)
-      await boot()
-    })
-  }
+    const sort = newProduct.sort_order.trim() ? Number(newProduct.sort_order.trim()) : 999
+    if (!Number.isFinite(sort)) throw new Error('Sort order invalid')
 
-  async function loadAgents() {
-    setLoadingAgents(true)
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(5000)
+    const payload = {
+      carrier_id: productsCarrier.id,
+      product_name: name,
+      sort_order: sort,
+      is_active: true,
+    }
 
-      if (error) throw error
-      setAgents((data || []) as Profile[])
-    } catch (e: any) {
-      setToast(`Could not load agents: ${errMsg(e)}`)
-      setAgents([])
-    } finally {
-      setLoadingAgents(false)
-    }
-  }
+    const { error } = await supabase.from('carrier_products').insert(payload)
+    if (error) throw error
 
-  const filteredAgents = useMemo(() => {
-    const q = agentSearch.trim().toLowerCase()
-    if (!q) return agents
-    return agents.filter((a) => {
-      const b = [a.first_name, a.last_name, a.email].filter(Boolean).join(' ').toLowerCase()
-      return b.includes(q)
-    })
-  }, [agents, agentSearch])
+    setNewProduct({ product_name: '', sort_order: '' })
+    await openProducts(productsCarrier) // reload
+  })
+}
 
-  const uplineOptions = useMemo(() => {
-    return agents
-      .slice()
-      .sort((a, b) => {
-        const an = `${a.first_name || ''} ${a.last_name || ''}`.trim().toLowerCase()
-        const bn = `${b.first_name || ''} ${b.last_name || ''}`.trim().toLowerCase()
-        return an.localeCompare(bn)
-      })
-      .map((a) => ({
-        id: a.id,
-        label: `${(a.first_name || '').trim()} ${(a.last_name || '').trim()}${a.email ? ` • ${a.email}` : ''}`.trim(),
-      }))
-  }, [agents])
+async function toggleProduct(p: ProductRow) {
+  await run(setProductsSaving, setToast, 'Product updated', async () => {
+    const { error } = await supabase
+      .from('carrier_products')
+      .update({ is_active: !(p.is_active !== false) })
+      .eq('id', p.id)
+    if (error) throw error
+    if (productsCarrier) await openProducts(productsCarrier)
+  })
+}
 
-  function openEdit(a: Profile) {
-    setEditTarget(a)
-    setEdit({
-      first_name: a.first_name || '',
-      last_name: a.last_name || '',
-      role: a.role || 'agent',
-      is_agency_owner: !!a.is_agency_owner,
-      comp: typeof a.comp === 'number' ? a.comp : 70,
-      upline_id: a.upline_id || '',
-      theme: a.theme || 'blue',
-    })
-    setEditOpen(true)
-  }
+async function deleteProduct(p: ProductRow) {
+  const ok = window.confirm(`Delete "${p.product_name}"?`)
+  if (!ok) return
+  await run(setProductsSaving, setToast, 'Product deleted', async () => {
+    const { error } = await supabase.from('carrier_products').delete().eq('id', p.id)
+    if (error) throw error
+    if (productsCarrier) await openProducts(productsCarrier)
+  })
+}
 
-  async function saveEdit() {
-    if (!editTarget) return
-    await run(setEditSaving, setToast, 'Agent updated', async () => {
-      const token = await authHeader()
-      if (!token) throw new Error('Not logged in')
+// 5) NOW replace your current Carriers tab JSX with THIS block:
 
-      const res = await fetch('/api/admin/users/update', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: token },
-        body: JSON.stringify({
-          user_id: editTarget.id,
-          first_name: edit.first_name,
-          last_name: edit.last_name,
-          role: edit.role,
-          is_agency_owner: edit.is_agency_owner,
-          comp: edit.comp,
-          upline_id: edit.upline_id || null,
-          theme: edit.theme,
-        }),
-      })
+/* -------------------- CARRIERS TAB -------------------- */
+{
+  tab === 'carriers' && isAdmin && (
+    <div className="glass rounded-2xl border border-white/10 p-6">
+      <div className="flex items-start justify-between gap-4 mb-5">
+        <div>
+          <div className="text-sm font-semibold">Carriers</div>
+          <div className="text-xs text-white/55 mt-1">
+            Carrier records + products. (Everything editable.)
+          </div>
+        </div>
 
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(json.error || 'Update failed')
+        <div className="flex items-center gap-2">
+          <button onClick={() => setCreateOpen(true)} className={saveBtn}>
+            Add Carrier
+          </button>
 
-      setEditOpen(false)
-      setEditTarget(null)
-      await loadAgents()
-    })
-  }
+          <button
+            onClick={() =>
+              run(setRefreshingCarriers, setToast, 'Carriers refreshed', async () => {
+                await loadCarriers()
+              })
+            }
+            disabled={refreshingCarriers}
+            className={btnGlass + (refreshingCarriers ? ' opacity-50 cursor-not-allowed' : '')}
+          >
+            {refreshingCarriers ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
+      </div>
 
-  async function inviteAgent() {
-    await run(setInviting, setToast, 'Invite sent', async () => {
-      const token = await authHeader()
-      if (!token) throw new Error('Not logged in')
-      if (!invite.email.trim()) throw new Error('Email required')
-      if (!invite.first_name.trim() || !invite.last_name.trim()) throw new Error('Name required')
+      <div className="glass rounded-2xl border border-white/10 px-3 py-2 flex items-center gap-2 mb-4">
+        <input
+          className="bg-transparent outline-none text-sm w-full placeholder:text-white/40"
+          placeholder="Search carriers…"
+          value={carrierSearch}
+          onChange={(e) => setCarrierSearch(e.target.value)}
+        />
+      </div>
 
-      const res = await fetch('/api/admin/invite', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: token },
-        body: JSON.stringify({
-          email: invite.email.trim(),
-          first_name: invite.first_name.trim() || null,
-          last_name: invite.last_name.trim() || null,
-          upline_id: invite.upline_id || null,
-          comp: invite.comp,
-          role: invite.role,
-          is_agency_owner: invite.is_agency_owner,
-          theme: invite.theme,
-        }),
-      })
+      {loadingCarriers && <div className="text-sm text-white/60">Loading…</div>}
 
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(json.error || 'Invite failed')
+      {!loadingCarriers && (
+        <div className="rounded-2xl border border-white/10 overflow-hidden">
+          <div className="grid grid-cols-12 px-4 py-3 border-b border-white/10 text-[11px] text-white/60 bg-white/5">
+            <div className="col-span-3">Carrier</div>
+            <div className="col-span-3">Supported Name</div>
+            <div className="col-span-2 text-right">Advance</div>
+            <div className="col-span-1 text-right">Sort</div>
+            <div className="col-span-2 text-center">Products</div>
+            <div className="col-span-1 text-right">Actions</div>
+          </div>
 
-      setInviteOpen(false)
-      setInvite({
-        first_name: '',
-        last_name: '',
-        email: '',
-        upline_id: '',
-        comp: 70,
-        role: 'agent',
-        is_agency_owner: false,
-        theme: 'blue',
-      })
-      await loadAgents()
-    })
-  }
+          {filteredCarriers.map((c) => (
+            <div key={c.id} className="grid grid-cols-12 px-4 py-3 border-b border-white/10 text-sm items-center">
+              <div className="col-span-3 font-semibold">{c.name}</div>
+              <div className="col-span-3 text-white/70">{c.supported_name || '—'}</div>
+              <div className="col-span-2 text-right text-white/80">{Number(c.advance_rate || 0).toFixed(2)}</div>
+              <div className="col-span-1 text-right text-white/70">{c.sort_order}</div>
 
-  async function updatePosition() {
-    await run(setSavingPosition, setToast, 'Position updated', async () => {
-      const token = await authHeader()
-      if (!token) throw new Error('Not logged in')
-      if (!pos.user_id) throw new Error('Select a user')
+              <div className="col-span-2 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => openProducts(c)}
+                  className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-3 py-2 text-xs font-semibold"
+                  title="Manage products"
+                >
+                  Manage
+                </button>
+              </div>
 
-      const res = await fetch('/api/admin/position', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: token },
-        body: JSON.stringify({
-          user_id: pos.user_id,
-          upline_id: pos.upline_id || null,
-          comp: pos.comp,
-          effective_date: pos.effective_date || null,
-        }),
-      })
+              <div className="col-span-1 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => openCarrierEdit(c)}
+                  className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-2 py-2"
+                  title="Edit"
+                >
+                  ✏️
+                </button>
 
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(json.error || 'Update failed')
+                <button
+                  type="button"
+                  onClick={() => deleteCarrier(c)}
+                  className="rounded-xl border border-white/10 bg-white/5 hover:bg-red-600/30 transition px-2 py-2"
+                  title="Delete"
+                >
+                  🗑
+                </button>
+              </div>
+            </div>
+          ))}
 
-      setPos({ user_id: '', upline_id: '', comp: 70, effective_date: '' })
-      await loadAgents()
-    })
-  }
+          {filteredCarriers.length === 0 && <div className="px-4 py-6 text-sm text-white/60">No carriers.</div>}
+        </div>
+      )}
 
-  async function loadCarriers() {
-    setLoadingCarriers(true)
-    try {
-      const { data, error } = await supabase
-        .from('carriers')
-        .select('id,created_at,name,supported_name,advance_rate,active,sort_order,eapp_url,portal_url,support_phone,logo_url')
-        .order('sort_order', { ascending: true })
-        .order('name', { ascending: true })
-        .limit(5000)
-
-      if (error) throw error
-      setCarriers((data || []) as CarrierRow[])
-    } catch (e: any) {
-      setToast(`Could not load carriers: ${errMsg(e)}`)
-      setCarriers([])
-    } finally {
-      setLoadingCarriers(false)
-    }
-  }
-
-  const filteredCarriers = useMemo(() => {
-    const q = carrierSearch.trim().toLowerCase()
-    if (!q) return carriers
-    return carriers.filter((c) => {
-      const b = [c.name, c.supported_name].filter(Boolean).join(' ').toLowerCase()
-      return b.includes(q)
-    })
-  }, [carriers, carrierSearch])
-
-  async function createCarrier() {
-    await run(setCreatingCarrier, setToast, 'Carrier created', async () => {
-      const name = newCarrier.name.trim()
-      if (!name) throw new Error('Carrier name required')
-
-      const adv = Number(newCarrier.advance_rate)
-      if (!Number.isFinite(adv) || adv <= 0) throw new Error('Advance rate invalid')
-
-      const sort = newCarrier.sort_order.trim() ? Number(newCarrier.sort_order.trim()) : 999
-      if (!Number.isFinite(sort)) throw new Error('Sort order invalid')
-
-      const payload = {
-        name,
-        supported_name: newCarrier.supported_name.trim() || null,
-        advance_rate: adv,
-        active: !!newCarrier.active,
-        sort_order: sort,
-        eapp_url: newCarrier.eapp_url.trim() || null,
-        portal_url: newCarrier.portal_url.trim() || null,
-        support_phone: newCarrier.support_phone.trim() || null,
-        logo_url: newCarrier.logo_url.trim() || null,
-      }
-
-      const { error } = await supabase.from('carriers').insert(payload)
-      if (error) throw error
-
-      setCreateOpen(false)
-      setNewCarrier({
-        name: '',
-        supported_name: '',
-        advance_rate: '0.75',
-        sort_order: '',
-        active: true,
-        eapp_url: '',
-        portal_url: '',
-        support_phone: '',
-        logo_url: '',
-      })
-      await loadCarriers()
-    })
-  }
-
-  return (
-    <div className="min-h-screen">
-      <Sidebar />
-
-          {toast && (
-        <div className="fixed top-5 right-5 z-50">
-          <div className="glass px-5 py-4 rounded-2xl border border-[var(--cardBorder)] shadow-2xl">
-            <div className="text-sm font-semibold">{toast}</div>
-            <div className="mt-3 flex gap-2">
-              <button className={btnSoft} onClick={() => setToast(null)}>
-                OK
+      {/* ---------------- EDIT CARRIER MODAL ---------------- */}
+      {carrierEditOpen && (
+        <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-xl glass rounded-2xl border border-white/10 p-6">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <div className="text-sm font-semibold">Edit Carrier</div>
+                <div className="text-xs text-white/55 mt-1">{carrierEditTarget?.name || '—'}</div>
+              </div>
+              <button onClick={() => setCarrierEditOpen(false)} className={btnGlass}>
+                Close
               </button>
             </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field label="Carrier Name">
+                <input className={inputCls} value={carrierEdit.name} onChange={(e) => setCarrierEdit((p) => ({ ...p, name: e.target.value }))} />
+              </Field>
+
+              <Field label="Supported Name">
+                <input className={inputCls} value={carrierEdit.supported_name} onChange={(e) => setCarrierEdit((p) => ({ ...p, supported_name: e.target.value }))} />
+              </Field>
+
+              <Field label="Advance Rate">
+                <input className={inputCls} value={carrierEdit.advance_rate} onChange={(e) => setCarrierEdit((p) => ({ ...p, advance_rate: e.target.value }))} />
+              </Field>
+
+              <Field label="Sort Order">
+                <input className={inputCls} value={carrierEdit.sort_order} onChange={(e) => setCarrierEdit((p) => ({ ...p, sort_order: e.target.value }))} />
+              </Field>
+
+              <Field label="Active">
+                <select className={inputCls} value={carrierEdit.active ? 'yes' : 'no'} onChange={(e) => setCarrierEdit((p) => ({ ...p, active: e.target.value === 'yes' }))}>
+                  <option value="yes">yes</option>
+                  <option value="no">no</option>
+                </select>
+              </Field>
+            </div>
+
+            <button
+              onClick={saveCarrierEdit}
+              disabled={carrierEditSaving}
+              className={saveWide + (carrierEditSaving ? ' opacity-50 cursor-not-allowed' : '')}
+            >
+              {carrierEditSaving ? 'Saving…' : 'Save Carrier'}
+            </button>
           </div>
         </div>
       )}
 
+      {/* ---------------- PRODUCTS MODAL ---------------- */}
+      {productsOpen && (
+        <div className="fixed inset-0 z-[220] flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-2xl glass rounded-2xl border border-white/10 p-6">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <div className="text-sm font-semibold">Products</div>
+                <div className="text-xs text-white/55 mt-1">{productsCarrier?.name || '—'}</div>
+              </div>
+              <button
+                onClick={() => {
+                  setProductsOpen(false)
+                  setProductsCarrier(null)
+                }}
+                className={btnGlass}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+              <Field label="New Product Name">
+                <input
+                  className={inputCls}
+                  value={newProduct.product_name}
+                  onChange={(e) => setNewProduct((p) => ({ ...p, product_name: e.target.value }))}
+                  placeholder="Product name"
+                />
+              </Field>
+
+              <Field label="Sort Order">
+                <input
+                  className={inputCls}
+                  value={newProduct.sort_order}
+                  onChange={(e) => setNewProduct((p) => ({ ...p, sort_order: e.target.value }))}
+                  placeholder="10"
+                />
+              </Field>
+
+              <div className="flex items-end">
+                <button
+                  onClick={addProduct}
+                  disabled={productsSaving}
+                  className={saveBtn + (productsSaving ? ' opacity-50 cursor-not-allowed' : '')}
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+
+            {productsLoading ? (
+              <div className="text-sm text-white/60">Loading…</div>
+            ) : (
+              <div className="rounded-2xl border border-white/10 overflow-hidden">
+                <div className="grid grid-cols-12 px-4 py-3 border-b border-white/10 text-[11px] text-white/60 bg-white/5">
+                  <div className="col-span-7">Product</div>
+                  <div className="col-span-2 text-right">Sort</div>
+                  <div className="col-span-2 text-center">Active</div>
+                  <div className="col-span-1 text-right">Actions</div>
+                </div>
+
+                {products.map((p) => {
+                  const active = p.is_active !== false
+                  return (
+                    <div key={p.id} className="grid grid-cols-12 px-4 py-3 border-b border-white/10 text-sm items-center">
+                      <div className="col-span-7 font-semibold">{p.product_name}</div>
+                      <div className="col-span-2 text-right text-white/70">{p.sort_order ?? '—'}</div>
+                      <div className="col-span-2 flex justify-center">
+                        <button
+                          onClick={() => toggleProduct(p)}
+                          disabled={productsSaving}
+                          className={[
+                            'rounded-xl border px-3 py-2 text-xs font-semibold transition',
+                            active ? 'border-green-400/25 bg-green-500/10 text-green-200' : 'border-white/10 bg-white/5 text-white/60',
+                          ].join(' ')}
+                          title="Toggle active"
+                        >
+                          {active ? 'Active' : 'Off'}
+                        </button>
+                      </div>
+                      <div className="col-span-1 flex justify-end">
+                        <button
+                          onClick={() => deleteProduct(p)}
+                          disabled={productsSaving}
+                          className="rounded-xl border border-white/10 bg-white/5 hover:bg-red-600/30 transition px-2 py-2"
+                          title="Delete"
+                        >
+                          🗑
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+
+                {products.length === 0 && <div className="px-4 py-6 text-sm text-white/60">No products.</div>}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
       {/* EDIT MODAL */}
       {editOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 px-4">
