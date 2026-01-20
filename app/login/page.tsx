@@ -103,10 +103,10 @@ export default function LoginPage() {
           <div className="absolute -bottom-24 -right-24 h-64 w-64 rounded-full bg-white/10 blur-3xl" />
 
           <div className="relative">
-            <div className="text-xs text-white/60">FLOW</div>
-            <h1 className="text-3xl font-semibold tracking-tight mt-2">Deal House Portal</h1>
+            <div className="text-xs text-white/60">Out With The Old, In With The New</div>
+            <h1 className="text-3xl font-semibold tracking-tight mt-2">Flow</h1>
             <p className="text-sm text-white/60 mt-3 leading-relaxed">
-              Clean, glass-theme tracking for production, follow ups, and team momentum.
+              A CRM for lazy agents who want to submit business, make money, and have their book keeping and analytics automated.
             </p>
 
             <div className="mt-6 grid grid-cols-2 gap-3">
