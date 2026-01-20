@@ -476,7 +476,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
+    <div className="min-h-screen">
       <Sidebar />
 
           {toast && (
