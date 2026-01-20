@@ -1,75 +1,50 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect } from 'react'
 import { supabase } from '@/lib/supabaseClient'
-import { DEFAULT_THEME, THEME_VARS, ThemeKey } from '@/lib/themes'
 
-function applyTheme(theme: ThemeKey) {
-  const t = THEME_VARS[theme] || THEME_VARS[DEFAULT_THEME]
-  const r = document.documentElement
-
-  r.style.setProperty('--accent', t.accent)
-  r.style.setProperty('--accent2', t.accent2)
-  r.style.setProperty('--accentText', t.textOnAccent)
-  r.style.setProperty('--card', t.card)
-  r.style.setProperty('--cardBorder', t.cardBorder)
-  r.style.setProperty('--glow', t.glow)
-
-  r.setAttribute('data-theme', theme)
-}
+const DEFAULT_THEME = 'blue'
 
 export default function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [ready, setReady] = useState(false)
-
   useEffect(() => {
     let alive = true
 
-    async function boot() {
+    async function bootTheme() {
       try {
-        // default immediately to avoid flash
-        applyTheme(DEFAULT_THEME)
-
-        const { data } = await supabase.auth.getSession()
-        const uid = data.session?.user?.id
-        if (!uid) {
-          if (!alive) return
-          setReady(true)
-          return
+        // 1️⃣ Try localStorage first (fastest, instant paint)
+        const cached = localStorage.getItem('flow-theme')
+        if (cached) {
+          document.documentElement.dataset.theme = cached
         }
 
-        const { data: prof } = await supabase
+        // 2️⃣ Load user theme from Supabase (source of truth)
+        const { data: userRes } = await supabase.auth.getUser()
+        const uid = userRes.user?.id
+        if (!uid || !alive) return
+
+        const { data } = await supabase
           .from('profiles')
           .select('theme')
           .eq('id', uid)
           .single()
 
-        const theme = (prof?.theme || DEFAULT_THEME) as ThemeKey
-        applyTheme(theme)
+        const theme = data?.theme || DEFAULT_THEME
 
-        // update theme live if session changes
-        supabase.auth.onAuthStateChange(async (_evt, session) => {
-          const id = session?.user?.id
-          if (!id) return applyTheme(DEFAULT_THEME)
-          const { data: p } = await supabase.from('profiles').select('theme').eq('id', id).single()
-          applyTheme(((p?.theme || DEFAULT_THEME) as ThemeKey) || DEFAULT_THEME)
-        })
-
-        if (!alive) return
-        setReady(true)
+        // 3️⃣ Apply + persist
+        document.documentElement.dataset.theme = theme
+        localStorage.setItem('flow-theme', theme)
       } catch {
-        applyTheme(DEFAULT_THEME)
-        if (!alive) return
-        setReady(true)
+        // Safe fallback
+        document.documentElement.dataset.theme = DEFAULT_THEME
       }
     }
 
-    boot()
+    bootTheme()
+
     return () => {
       alive = false
     }
   }, [])
 
-  const body = useMemo(() => children, [children])
-  if (!ready) return body
-  return body
+  return <>{children}</>
 }
