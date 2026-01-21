@@ -1,21 +1,35 @@
-import { redirect } from 'next/navigation'
-import { cookies } from 'next/headers'
-import { createServerClient } from '@supabase/ssr'
+'use client'
 
-export default async function HomePage() {
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies }
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { supabase } from '@/lib/supabaseClient'
+
+export default function HomePage() {
+  const router = useRouter()
+
+  useEffect(() => {
+    let alive = true
+
+    ;(async () => {
+      try {
+        const { data } = await supabase.auth.getUser()
+        if (!alive) return
+
+        if (data?.user) router.replace('/dashboard')
+        else router.replace('/login')
+      } catch {
+        router.replace('/login')
+      }
+    })()
+
+    return () => {
+      alive = false
+    }
+  }, [router])
+
+  return (
+    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)] flex items-center justify-center">
+      <div className="glass px-6 py-5 text-sm text-white/80">Loading…</div>
+    </div>
   )
-
-  const { data } = await supabase.auth.getUser()
-
-  // ✅ Logged in → dashboard
-  if (data?.user) {
-    redirect('/dashboard')
-  }
-
-  // ✅ Logged out → login
-  redirect('/login')
 }
