@@ -1,8 +1,9 @@
+// ✅ REPLACE ENTIRE FILE: /app/components/Sidebar.tsx
 'use client'
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 
 const NAV = [
@@ -16,87 +17,95 @@ const NAV = [
   { label: 'Settings', href: '/settings' },
 ] as const
 
-type ThemeMode = 'dark' | 'light'
-
-function applyTheme(mode: ThemeMode) {
-  if (typeof document === 'undefined') return
-
-  // Persist + set marker
-  localStorage.setItem('flow_theme', mode)
-  document.documentElement.dataset.theme = mode
-
-  // Update shared CSS variables (your pages already use var(--bg) / var(--text))
-  if (mode === 'light') {
-    document.documentElement.style.setProperty('--bg', '#f7f8fb')
-    document.documentElement.style.setProperty('--text', '#0b1020')
-    document.documentElement.style.setProperty('--panel', 'rgba(255,255,255,0.72)')
-    document.documentElement.style.setProperty('--panelSolid', '#ffffff')
-    document.documentElement.style.setProperty('--border', 'rgba(0,0,0,0.10)')
-    document.documentElement.style.setProperty('--muted', 'rgba(0,0,0,0.55)')
-    document.documentElement.style.setProperty('--muted2', 'rgba(0,0,0,0.35)')
-  } else {
-    document.documentElement.style.setProperty('--bg', '#0b0f1a')
-    document.documentElement.style.setProperty('--text', '#ffffff')
-    document.documentElement.style.setProperty('--panel', 'rgba(255,255,255,0.05)')
-    document.documentElement.style.setProperty('--panelSolid', '#070a12')
-    document.documentElement.style.setProperty('--border', 'rgba(255,255,255,0.10)')
-    document.documentElement.style.setProperty('--muted', 'rgba(255,255,255,0.55)')
-    document.documentElement.style.setProperty('--muted2', 'rgba(255,255,255,0.35)')
-  }
+type Me = {
+  id: string
+  name: string
+  email: string
+  avatarUrl: string
 }
 
 export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
 
-  const [theme, setTheme] = useState<ThemeMode>('dark')
-  const [avatarUrl, setAvatarUrl] = useState<string>('')
-  const [displayName, setDisplayName] = useState<string>('')
+  // ✅ Auto-hide / fade when not in use
+  const [open, setOpen] = useState(false)
+  const closeTimer = useRef<number | null>(null)
+
+  // ✅ Profile (bigger + sync)
+  const [me, setMe] = useState<Me | null>(null)
 
   useEffect(() => {
-    // Load theme (default dark)
-    const saved = (typeof window !== 'undefined' ? (localStorage.getItem('flow_theme') as ThemeMode | null) : null) || 'dark'
-    setTheme(saved)
-    applyTheme(saved)
+    let alive = true
 
-    // Load user pic/name (no DB dependency; uses auth metadata safely)
     ;(async () => {
       try {
-        const { data } = await supabase.auth.getUser()
-        const u = data.user
+        const { data: uRes } = await supabase.auth.getUser()
+        const u = uRes.user
         if (!u) return
-        const md: any = u.user_metadata || {}
-        const pic =
-          md.avatar_url ||
-          md.picture ||
-          md.photo_url ||
-          md.image ||
-          '' // fallback empty -> initials
-        setAvatarUrl(String(pic || ''))
 
-        const name =
-          md.full_name ||
-          md.name ||
-          [md.first_name, md.last_name].filter(Boolean).join(' ') ||
-          (u.email ? String(u.email).split('@')[0] : 'Flow User')
-        setDisplayName(String(name || 'Flow User'))
-      } catch {}
+        // Try profiles.avatar_url first (if your schema has it), fall back to auth metadata
+        let avatarUrl = ''
+        let fullName = ''
+        let email = u.email || ''
+
+        try {
+          const { data: prof } = await supabase
+            .from('profiles')
+            // ✅ If avatar_url doesn't exist in your table, supabase will error.
+            // We safely catch and fall back below.
+            .select('first_name,last_name,email,avatar_url')
+            .eq('id', u.id)
+            .single()
+
+          fullName =
+            `${(prof as any)?.first_name || ''} ${(prof as any)?.last_name || ''}`.trim() || ''
+          email = (prof as any)?.email || email
+          avatarUrl = String((prof as any)?.avatar_url || '')
+        } catch {
+          // ignore and fall back
+        }
+
+        const meta: any = u.user_metadata || {}
+        if (!avatarUrl) avatarUrl = String(meta.avatar_url || meta.picture || meta.photoURL || '')
+        if (!fullName) fullName = String(meta.full_name || meta.name || '').trim()
+
+        const name = fullName || (email ? email.split('@')[0] : 'Agent')
+
+        if (!alive) return
+        setMe({
+          id: u.id,
+          name,
+          email: email || '',
+          avatarUrl,
+        })
+      } catch {
+        // ignore
+      }
     })()
+
+    return () => {
+      alive = false
+    }
   }, [])
 
   const initials = useMemo(() => {
-    const n = String(displayName || '').trim()
-    if (!n) return 'F'
-    const parts = n.split(/\s+/).filter(Boolean)
-    const a = parts[0]?.[0] || 'F'
+    const n = (me?.name || '').trim()
+    if (!n) return 'A'
+    const parts = n.split(' ').filter(Boolean)
+    const a = parts[0]?.[0] || 'A'
     const b = parts.length > 1 ? parts[parts.length - 1]?.[0] : ''
     return (a + b).toUpperCase()
-  }, [displayName])
+  }, [me?.name])
 
-  function toggleTheme() {
-    const next: ThemeMode = theme === 'dark' ? 'light' : 'dark'
-    setTheme(next)
-    applyTheme(next)
+  function scheduleClose() {
+    if (closeTimer.current) window.clearTimeout(closeTimer.current)
+    closeTimer.current = window.setTimeout(() => setOpen(false), 900)
+  }
+
+  function cancelClose() {
+    if (closeTimer.current) window.clearTimeout(closeTimer.current)
+    closeTimer.current = null
   }
 
   async function logout() {
@@ -108,93 +117,124 @@ export default function Sidebar() {
   }
 
   return (
-    <aside
-      className={[
-        'fixed left-0 top-0 h-screen w-64 p-6 border-r',
-        // ✅ stop color-blocking: follow app variables/theme
-        'bg-[var(--panelSolid)]',
-        'border-[var(--border)]',
-      ].join(' ')}
-    >
-      {/* Header w/ profile circle (top-left) */}
-      <div className="mb-8 flex items-center gap-3">
-        <div className="relative h-10 w-10 rounded-full border border-white/10 overflow-hidden bg-white/5 flex items-center justify-center">
-          {avatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={avatarUrl} alt="Profile" className="h-full w-full object-cover" />
-          ) : (
-            <div className="text-xs font-extrabold text-white/80">{initials}</div>
-          )}
-        </div>
+    <>
+      {/* ✅ Slim “handle” shown when sidebar is closed */}
+      {!open && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="fixed left-3 top-6 z-40 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-3 py-2 text-xs text-white/80 backdrop-blur-xl"
+          aria-label="Open navigation"
+        >
+          ☰
+        </button>
+      )}
 
-        <div className="min-w-0">
-          <div className="text-xl font-semibold tracking-tight leading-tight">Flow</div>
-          <div className="text-xs mt-1 truncate" style={{ color: 'var(--muted)' }}>
-            Deal tracking
+      <aside
+        onMouseEnter={() => {
+          cancelClose()
+          setOpen(true)
+        }}
+        onMouseLeave={scheduleClose}
+        onFocusCapture={() => {
+          cancelClose()
+          setOpen(true)
+        }}
+        className={[
+          'fixed left-0 top-0 z-40 h-screen w-72 p-6 border-r border-white/10',
+          'bg-[#070a12]/92 backdrop-blur-xl',
+          'transition-all duration-300',
+          open ? 'translate-x-0 opacity-100' : '-translate-x-60 opacity-0 pointer-events-none',
+        ].join(' ')}
+      >
+        {/* Header */}
+        <div className="mb-7 flex items-center gap-4">
+          {/* ✅ BIG profile icon */}
+          <div className="relative h-16 w-16 rounded-full overflow-hidden border border-white/10 bg-white/5">
+            {me?.avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={me.avatarUrl}
+                alt="Profile"
+                className="h-full w-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="h-full w-full flex items-center justify-center text-lg font-extrabold text-white/80">
+                {initials}
+              </div>
+            )}
+
+            {/* subtle glow */}
+            <div className="pointer-events-none absolute inset-0">
+              <div className="absolute -inset-8 rounded-full bg-white/5 blur-2xl" />
+            </div>
+          </div>
+
+          <div className="min-w-0">
+            <div className="text-lg font-semibold tracking-tight leading-tight">Flow</div>
+            <div className="text-[11px] text-white/55 mt-1 truncate">
+              {me?.name ? me.name : 'Deal tracking'}
+            </div>
           </div>
         </div>
-      </div>
 
-      <nav className="flex flex-col gap-2">
-        {NAV.map((item) => {
-          const active = pathname === item.href
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={[
-                'rounded-xl px-4 py-3 text-sm transition border flex items-center justify-between',
-                active ? 'bg-white/10 border-white/15' : 'bg-transparent border-transparent hover:bg-white/5 hover:border-white/10',
-              ].join(' ')}
+        {/* Nav */}
+        <nav className="flex flex-col gap-1.5">
+          {NAV.map((item) => {
+            const active = pathname === item.href
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={[
+                  'rounded-xl px-4 py-3 transition border flex items-center justify-between',
+                  // ✅ slightly smaller category text
+                  'text-[13px] font-medium',
+                  active
+                    ? 'bg-white/10 border-white/15'
+                    : 'bg-transparent border-transparent hover:bg-white/5 hover:border-white/10',
+                ].join(' ')}
+              >
+                <span className="text-white/90">{item.label}</span>
+                {active ? (
+                  <span
+                    className="h-2 w-2 rounded-full"
+                    style={{
+                      background: 'var(--accent)',
+                      boxShadow: '0 0 18px var(--glow)',
+                    }}
+                  />
+                ) : null}
+              </Link>
+            )
+          })}
+        </nav>
+
+        {/* Bottom area */}
+        <div className="absolute bottom-6 left-6 right-6">
+          <div className="h-px bg-white/10 mb-4" />
+
+          <button
+            onClick={logout}
+            className="w-full rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-4 py-3 text-[13px] font-semibold text-white/85"
+          >
+            Logout
+          </button>
+
+          <div className="mt-4 flex items-center justify-between text-[11px] text-white/40">
+            <span>v1</span>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-3 py-2"
+              aria-label="Close navigation"
             >
-              <span>{item.label}</span>
-              {active ? (
-                <span
-                  className="h-2 w-2 rounded-full"
-                  style={{
-                    background: 'var(--accent)',
-                    boxShadow: '0 0 18px var(--glow)',
-                  }}
-                />
-              ) : null}
-            </Link>
-          )
-        })}
-      </nav>
-
-      {/* Bottom actions */}
-      <div className="absolute bottom-6 left-6 right-6 space-y-3">
-        {/* Theme toggle */}
-        <button
-          onClick={toggleTheme}
-          className="w-full rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-4 py-3 text-sm font-semibold flex items-center justify-between"
-        >
-          <span>{theme === 'dark' ? 'Dark Mode' : 'Light Mode'}</span>
-          <span className="text-white/60">{theme === 'dark' ? '🌙' : '☀️'}</span>
-        </button>
-
-        {/* Logout */}
-        <button
-          onClick={logout}
-          className="w-full rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-4 py-3 text-sm font-semibold flex items-center justify-between"
-        >
-          <span>Logout</span>
-          <span className="text-white/60">↩︎</span>
-        </button>
-
-        {/* Compliance / footer */}
-        <div className="flex items-center justify-between text-[11px]" style={{ color: 'var(--muted2)' }}>
-          <span>v1</span>
-          <div className="flex items-center gap-3">
-            <Link href="/terms" className="hover:underline">
-              Terms
-            </Link>
-            <Link href="/privacy" className="hover:underline">
-              Privacy
-            </Link>
+              Close
+            </button>
           </div>
         </div>
-      </div>
-    </aside>
+      </aside>
+    </>
   )
 }
