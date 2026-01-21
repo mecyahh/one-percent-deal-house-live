@@ -28,11 +28,11 @@ export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
 
-  // ✅ Auto-hide / fade when not in use
+  // ✅ Dock-like hover reveal (always “there”)
   const [open, setOpen] = useState(false)
   const closeTimer = useRef<number | null>(null)
 
-  // ✅ Profile (bigger + sync)
+  // ✅ Profile (big + sync)
   const [me, setMe] = useState<Me | null>(null)
 
   useEffect(() => {
@@ -44,7 +44,6 @@ export default function Sidebar() {
         const u = uRes.user
         if (!u) return
 
-        // Try profiles.avatar_url first (if your schema has it), fall back to auth metadata
         let avatarUrl = ''
         let fullName = ''
         let email = u.email || ''
@@ -52,8 +51,6 @@ export default function Sidebar() {
         try {
           const { data: prof } = await supabase
             .from('profiles')
-            // ✅ If avatar_url doesn't exist in your table, supabase will error.
-            // We safely catch and fall back below.
             .select('first_name,last_name,email,avatar_url')
             .eq('id', u.id)
             .single()
@@ -63,7 +60,7 @@ export default function Sidebar() {
           email = (prof as any)?.email || email
           avatarUrl = String((prof as any)?.avatar_url || '')
         } catch {
-          // ignore and fall back
+          // fallback
         }
 
         const meta: any = u.user_metadata || {}
@@ -73,12 +70,7 @@ export default function Sidebar() {
         const name = fullName || (email ? email.split('@')[0] : 'Agent')
 
         if (!alive) return
-        setMe({
-          id: u.id,
-          name,
-          email: email || '',
-          avatarUrl,
-        })
+        setMe({ id: u.id, name, email: email || '', avatarUrl })
       } catch {
         // ignore
       }
@@ -100,7 +92,7 @@ export default function Sidebar() {
 
   function scheduleClose() {
     if (closeTimer.current) window.clearTimeout(closeTimer.current)
-    closeTimer.current = window.setTimeout(() => setOpen(false), 900)
+    closeTimer.current = window.setTimeout(() => setOpen(false), 650)
   }
 
   function cancelClose() {
@@ -118,17 +110,14 @@ export default function Sidebar() {
 
   return (
     <>
-      {/* ✅ Slim “handle” shown when sidebar is closed */}
-      {!open && (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="fixed left-3 top-6 z-40 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-3 py-2 text-xs text-white/80 backdrop-blur-xl"
-          aria-label="Open navigation"
-        >
-          ☰
-        </button>
-      )}
+      {/* ✅ Always-present hover strip (like a dock “hot zone”) */}
+      <div
+        className="fixed left-0 top-0 z-40 h-screen w-4"
+        onMouseEnter={() => {
+          cancelClose()
+          setOpen(true)
+        }}
+      />
 
       <aside
         onMouseEnter={() => {
@@ -141,15 +130,15 @@ export default function Sidebar() {
           setOpen(true)
         }}
         className={[
+          // ✅ This is always mounted; it slides in/out on hover
           'fixed left-0 top-0 z-40 h-screen w-72 p-6 border-r border-white/10',
           'bg-[#070a12]/92 backdrop-blur-xl',
           'transition-all duration-300',
-          open ? 'translate-x-0 opacity-100' : '-translate-x-60 opacity-0 pointer-events-none',
+          open ? 'translate-x-0 opacity-100' : '-translate-x-64 opacity-0 pointer-events-none',
         ].join(' ')}
       >
         {/* Header */}
         <div className="mb-7 flex items-center gap-4">
-          {/* ✅ BIG profile icon */}
           <div className="relative h-16 w-16 rounded-full overflow-hidden border border-white/10 bg-white/5">
             {me?.avatarUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -165,7 +154,6 @@ export default function Sidebar() {
               </div>
             )}
 
-            {/* subtle glow */}
             <div className="pointer-events-none absolute inset-0">
               <div className="absolute -inset-8 rounded-full bg-white/5 blur-2xl" />
             </div>
@@ -189,7 +177,6 @@ export default function Sidebar() {
                 href={item.href}
                 className={[
                   'rounded-xl px-4 py-3 transition border flex items-center justify-between',
-                  // ✅ slightly smaller category text
                   'text-[13px] font-medium',
                   active
                     ? 'bg-white/10 border-white/15'
@@ -215,24 +202,17 @@ export default function Sidebar() {
         <div className="absolute bottom-6 left-6 right-6">
           <div className="h-px bg-white/10 mb-4" />
 
+          {/* ✅ Glass red hover logout */}
           <button
             onClick={logout}
-            className="w-full rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-4 py-3 text-[13px] font-semibold text-white/85"
+            className={[
+              'w-full rounded-2xl border border-white/10 bg-white/5',
+              'transition px-4 py-3 text-[13px] font-semibold text-white/85',
+              'hover:bg-red-500/12 hover:border-red-400/25 hover:text-red-200',
+            ].join(' ')}
           >
             Logout
           </button>
-
-          <div className="mt-4 flex items-center justify-between text-[11px] text-white/40">
-            <span>v1</span>
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-3 py-2"
-              aria-label="Close navigation"
-            >
-              Close
-            </button>
-          </div>
         </div>
       </aside>
     </>
