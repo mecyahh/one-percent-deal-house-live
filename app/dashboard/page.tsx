@@ -65,9 +65,9 @@ export default function DashboardPage() {
   // ✅ Notifications
   const [notifOpen, setNotifOpen] = useState(false)
 
-  // ✅ Dashboard calendar picker (state belongs here; UI goes in return)
-  const [date, setDate] = useState('') // YYYY-MM-DD
-
+  // ✅ Dashboard calendar (FlowDatePicker)
+const [date, setDate] = useState('') // YYYY-MM-DD
+  
   // ✅ Downlines/team scope
   const [teamIds, setTeamIds] = useState<string[] | null>(null)
 
@@ -90,20 +90,21 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
       <Sidebar />
 
-      <div className="ml-64 px-10 py-10">
-        {/* ✅ PLACEHOLDER HEADER AREA (put this where your dashboard header/actions live) */}
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <div className="text-3xl font-semibold tracking-tight">Dashboard</div>
-            <div className="text-sm text-white/60 mt-1">Overview</div>
-          </div>
+      <div className="mb-8 flex items-end justify-between">
+  <div>
+    <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
+    <p className="text-sm text-white/60 mt-1">...</p>
+  </div>
 
-          {/* ✅ FlowDatePicker UI (this was causing your syntax error because it was outside return) */}
-          <div className="w-[240px]">
-            <FlowDatePicker value={date} onChange={setDate} placeholder="Select date" />
-          </div>
-        </div>
+  <div className="flex items-end gap-3">
+    <div className="w-[240px]">
+      <FlowDatePicker value={date} onChange={setDate} placeholder="Select date" />
+    </div>
 
+    {/* keep your existing buttons/actions exactly as-is below */}
+    ...
+  </div>
+</div>
         {/* ✅ KEEP YOUR EXISTING DASHBOARD CONTENT BELOW THIS LINE */}
         {/* (Paste the rest of your original dashboard JSX/logic below — unchanged) */}
       </div>
