@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Sidebar from '../components/Sidebar'
 import { supabase } from '@/lib/supabaseClient'
 import FlowDatePicker from '@/app/components/FlowDatePicker'
+import { useRouter } from 'next/navigation'
 
 type FollowUp = {
   id: string
@@ -32,16 +33,19 @@ const CARRIERS = [
 ] as const
 
 export default function FollowUpsClient() {
+  const router = useRouter()
+
   const [toast, setToast] = useState<string | null>(null)
   const [rows, setRows] = useState<FollowUp[]>([])
   const [loading, setLoading] = useState(true)
-  const [alertsOn, setAlertsOn] = useState(false)
+
+  // ✅ Alerts always ON and cannot be turned off
+  const [alertsOn] = useState(true)
 
   const [form, setForm] = useState({
     full_name: '',
     phone: '',
-    // ✅ using new calendar (no native date input)
-    dob: '', // stored in notes (not DB) so we don't require follow_ups.dob column
+    dob: '', // stored in notes
     company: '',
     coverage: '',
     follow_up_date: '', // YYYY-MM-DD
@@ -53,10 +57,24 @@ export default function FollowUpsClient() {
 
   const chimeRef = useRef<HTMLAudioElement | null>(null)
 
+  // ✅ Reschedule/edit modal
+  const [editOpen, setEditOpen] = useState(false)
+  const [editRow, setEditRow] = useState<FollowUp | null>(null)
+  const [editDraft, setEditDraft] = useState({
+    full_name: '',
+    phone: '',
+    dob: '',
+    company: '',
+    coverage: '',
+    follow_up_date: '',
+    follow_up_time: '09:00',
+    notes: '',
+  })
+  const [editSaving, setEditSaving] = useState(false)
+
   useEffect(() => {
     chimeRef.current = typeof Audio !== 'undefined' ? new Audio('/chime.mp3') : null
 
-    // optional: default follow up date to today
     const now = new Date()
     setForm((f) => ({
       ...f,
@@ -78,7 +96,6 @@ export default function FollowUpsClient() {
       return
     }
 
-    // ✅ IMPORTANT: removed dob from SELECT because your table does NOT have follow_ups.dob
     const { data, error } = await supabase
       .from('follow_ups')
       .select('id, created_at, agent_id, full_name, phone, company, coverage, follow_up_at, notes, status')
@@ -116,12 +133,27 @@ export default function FollowUpsClient() {
     [rows, now]
   )
 
+  // ✅ Chime immediately when there are due items + every 30 minutes until cleared
   useEffect(() => {
     if (!alertsOn) return
     if (dueNowList.length === 0) return
-    try {
-      chimeRef.current?.play().catch(() => {})
-    } catch {}
+
+    let alive = true
+
+    const ring = () => {
+      if (!alive) return
+      try {
+        chimeRef.current?.play().catch(() => {})
+      } catch {}
+    }
+
+    ring()
+    const id = window.setInterval(ring, 30 * 60 * 1000)
+
+    return () => {
+      alive = false
+      window.clearInterval(id)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alertsOn, dueNowList.length])
 
@@ -153,8 +185,6 @@ export default function FollowUpsClient() {
 
     const followUpISO = combineLocalDateTimeISO(form.follow_up_date, form.follow_up_time || '09:00')
 
-    // ✅ store DOB in notes so we don't need a DB column
-    // (keeps your "DOB" UI without breaking your schema)
     const packedNotes = buildNotes({
       dob: form.dob || '',
       notes: form.notes || '',
@@ -195,6 +225,100 @@ export default function FollowUpsClient() {
     load()
   }
 
+  // ✅ No dual-entry routing actions
+  async function routeClosedDeal(r: FollowUp) {
+    await supabase.from('follow_ups').delete().eq('id', r.id).catch(() => {})
+
+    const parsed = parsePackedNotes(r.notes || '')
+    const dob = parsed.dob || ''
+
+    const qs = new URLSearchParams()
+    if (r.full_name) qs.set('full_name', r.full_name)
+    if (r.phone) qs.set('phone', r.phone)
+    if (r.company) qs.set('company', r.company)
+    if (r.coverage != null) qs.set('coverage', String(r.coverage))
+    if (dob) qs.set('dob', dob)
+
+    router.push(`/post-deal?${qs.toString()}`)
+  }
+
+  async function denyAndRemove(r: FollowUp) {
+    await supabase.from('follow_ups').update({ status: 'denied' }).eq('id', r.id).catch(() => {})
+    await supabase.from('follow_ups').delete().eq('id', r.id).catch(() => {})
+    setToast('Removed ✅')
+    load()
+  }
+
+  function openEdit(r: FollowUp) {
+    const parsed = parsePackedNotes(r.notes || '')
+    const dob = parsed.dob || ''
+
+    let d = ''
+    let t = '09:00'
+    if (r.follow_up_at) {
+      const dt = new Date(r.follow_up_at)
+      if (!Number.isNaN(dt.getTime())) {
+        d = toISODateLocal(dt)
+        t = toTimeHHMM(dt)
+      }
+    }
+
+    setEditRow(r)
+    setEditDraft({
+      full_name: r.full_name || '',
+      phone: r.phone || '',
+      dob,
+      company: r.company || '',
+      coverage: r.coverage != null ? formatMoneyInputNoDollar(String(r.coverage)) : '',
+      follow_up_date: d || toISODateLocal(new Date()),
+      follow_up_time: t,
+      notes: parsed.notes || '',
+    })
+    setEditOpen(true)
+  }
+
+  async function saveEdit() {
+    if (!editRow) return
+    if (editSaving) return
+    setEditSaving(true)
+    try {
+      if (!editDraft.follow_up_date) {
+        setToast('Follow up date is required')
+        return
+      }
+
+      const followUpISO = combineLocalDateTimeISO(editDraft.follow_up_date, editDraft.follow_up_time || '09:00')
+
+      const packedNotes = buildNotes({
+        dob: editDraft.dob || '',
+        notes: editDraft.notes || '',
+      })
+
+      const payload: any = {
+        full_name: editDraft.full_name.trim() || null,
+        phone: cleanPhone(editDraft.phone),
+        company: editDraft.company || null,
+        coverage: toNum(editDraft.coverage),
+        follow_up_at: followUpISO,
+        notes: packedNotes || null,
+        status: 'upcoming',
+      }
+
+      const { error } = await supabase.from('follow_ups').update(payload).eq('id', editRow.id)
+      if (error) {
+        setToast(`Update failed: ${error.message}`)
+        return
+      }
+
+      setEditOpen(false)
+      setEditRow(null)
+      setToast('Updated ✅')
+      load()
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
       <Sidebar />
@@ -212,6 +336,127 @@ export default function FollowUpsClient() {
         </div>
       )}
 
+      {/* ✅ EDIT / RESCHEDULE MODAL */}
+      {editOpen && (
+        <div className="fixed inset-0 z-[260] flex items-center justify-center bg-black/60 p-6">
+          <div className="glass w-full max-w-3xl rounded-2xl border border-white/10 p-6">
+            <div className="flex items-start justify-between gap-4 mb-5">
+              <div>
+                <div className="text-lg font-semibold">Edit Follow Up</div>
+                <div className="text-xs text-white/55 mt-1">Update details + reschedule without dual entry.</div>
+              </div>
+              <button
+                onClick={() => {
+                  setEditOpen(false)
+                  setEditRow(null)
+                }}
+                className={btnGlass}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field label="Full Name">
+                <input
+                  className={inputCls}
+                  value={editDraft.full_name}
+                  onChange={(e) => setEditDraft((d) => ({ ...d, full_name: e.target.value }))}
+                />
+              </Field>
+
+              <Field label="Phone">
+                <input
+                  className={inputCls}
+                  value={editDraft.phone}
+                  onChange={(e) => setEditDraft((d) => ({ ...d, phone: formatPhone(e.target.value) }))}
+                  placeholder="(888) 888-8888"
+                  inputMode="tel"
+                />
+              </Field>
+
+              <Field label="Client DOB">
+                <FlowDatePicker
+                  value={editDraft.dob}
+                  onChange={(v) => setEditDraft((d) => ({ ...d, dob: v }))}
+                  placeholder="Select DOB"
+                />
+              </Field>
+
+              <Field label="Company">
+                <select
+                  className={inputCls}
+                  value={editDraft.company}
+                  onChange={(e) => setEditDraft((d) => ({ ...d, company: e.target.value }))}
+                >
+                  <option value="">Select…</option>
+                  {CARRIERS.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+
+              <Field label="Coverage">
+                <input
+                  className={inputCls}
+                  value={editDraft.coverage}
+                  onChange={(e) => setEditDraft((d) => ({ ...d, coverage: moneyInputLocked(e.target.value) }))}
+                  onBlur={() => setEditDraft((d) => ({ ...d, coverage: formatMoneyInputNoDollar(d.coverage) }))}
+                  placeholder="100,000.00"
+                  inputMode="decimal"
+                />
+              </Field>
+
+              <Field label="Follow Up Date">
+                <FlowDatePicker
+                  value={editDraft.follow_up_date}
+                  onChange={(v) => setEditDraft((d) => ({ ...d, follow_up_date: v }))}
+                  placeholder="Select date"
+                />
+              </Field>
+
+              <Field label="Follow Up Time">
+                <FlowTimePicker
+                  value={editDraft.follow_up_time}
+                  onChange={(v) => setEditDraft((d) => ({ ...d, follow_up_time: v }))}
+                />
+              </Field>
+            </div>
+
+            <div className="mt-4">
+              <Field label="Notes">
+                <textarea
+                  className={`${inputCls} min-h-[110px]`}
+                  value={editDraft.notes}
+                  onChange={(e) => setEditDraft((d) => ({ ...d, notes: e.target.value }))}
+                />
+              </Field>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setEditOpen(false)
+                  setEditRow(null)
+                }}
+                className={btnGlass}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveEdit}
+                disabled={editSaving}
+                className={[btnGreen, editSaving ? 'opacity-50 cursor-not-allowed' : ''].join(' ')}
+              >
+                {editSaving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="ml-64 px-10 py-10">
         <div className="mb-8 flex items-end justify-between">
           <div>
@@ -220,9 +465,10 @@ export default function FollowUpsClient() {
           </div>
 
           <div className="flex items-center gap-3">
-            <button onClick={() => setAlertsOn((v) => !v)} className={alertsOn ? btnGreen : btnGlass}>
-              {alertsOn ? 'Alerts ON' : 'Enable Alerts'}
-            </button>
+            <div className="rounded-2xl border border-green-400/25 bg-green-500/12 px-4 py-2 text-sm font-semibold text-green-200">
+              Alerts ON
+            </div>
+
             <button onClick={load} className={btnGlass}>
               Refresh
             </button>
@@ -254,8 +500,9 @@ export default function FollowUpsClient() {
                 <input
                   className={inputCls}
                   value={form.phone}
-                  onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+                  onChange={(e) => setForm((f) => ({ ...f, phone: formatPhone(e.target.value) }))}
                   placeholder="(888) 888-8888"
+                  inputMode="tel"
                 />
               </Field>
 
@@ -286,8 +533,9 @@ export default function FollowUpsClient() {
                 <input
                   className={inputCls}
                   value={form.coverage}
-                  onChange={(e) => setForm((f) => ({ ...f, coverage: e.target.value }))}
-                  placeholder="100000.00"
+                  onChange={(e) => setForm((f) => ({ ...f, coverage: moneyInputLocked(e.target.value) }))}
+                  onBlur={() => setForm((f) => ({ ...f, coverage: formatMoneyInputNoDollar(f.coverage) }))}
+                  placeholder="100,000.00"
                   inputMode="decimal"
                 />
               </Field>
@@ -303,27 +551,15 @@ export default function FollowUpsClient() {
                 />
               </Field>
 
-             <Field label="Follow Up Time">
-  <div className="relative">
-    <input
-      type="time"
-      value={form.follow_up_time}
-      onChange={(e) => {
-        setPreset('custom')
-        setForm((f) => ({ ...f, follow_up_time: e.target.value }))
-      }}
-      className="
-        w-full rounded-2xl border border-white/10
-        bg-white/5 backdrop-blur-xl
-        px-4 py-3 text-sm outline-none
-        hover:bg-white/7 transition
-        focus:border-white/20 focus:bg-white/7
-        text-white
-        [color-scheme:dark]
-      "
-    />
-  </div>
-</Field>
+              <Field label="Follow Up Time">
+                <FlowTimePicker
+                  value={form.follow_up_time}
+                  onChange={(v) => {
+                    setPreset('custom')
+                    setForm((f) => ({ ...f, follow_up_time: v }))
+                  }}
+                />
+              </Field>
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
@@ -358,16 +594,40 @@ export default function FollowUpsClient() {
 
           {/* LISTS */}
           <div className="space-y-6">
-            <Section title="Due Now" count={dueNowList.length}>
+            <Section title="Due Now" count={dueNowList.length} onEditInfo={() => setToast('Edit any card using the pencil icon on the right.')}>
               {loading && <Empty text="Loading…" />}
               {!loading && dueNowList.length === 0 && <Empty text="No follow ups." />}
-              {!loading && dueNowList.map((r) => <Card key={r.id} r={r} due={true} onStatus={setStatus} />)}
+              {!loading &&
+                dueNowList.map((r) => (
+                  <Card
+                    key={r.id}
+                    r={r}
+                    due={true}
+                    onStatus={setStatus}
+                    onEdit={() => openEdit(r)}
+                    onClosedDeal={() => routeClosedDeal(r)}
+                    onDenied={() => denyAndRemove(r)}
+                    onFollowUp={() => openEdit(r)}
+                  />
+                ))}
             </Section>
 
-            <Section title="Upcoming" count={upcomingList.length}>
+            <Section title="Upcoming" count={upcomingList.length} onEditInfo={() => setToast('Edit any card using the pencil icon on the right.')}>
               {loading && <Empty text="Loading…" />}
               {!loading && upcomingList.length === 0 && <Empty text="No follow ups." />}
-              {!loading && upcomingList.map((r) => <Card key={r.id} r={r} due={false} onStatus={setStatus} />)}
+              {!loading &&
+                upcomingList.map((r) => (
+                  <Card
+                    key={r.id}
+                    r={r}
+                    due={false}
+                    onStatus={setStatus}
+                    onEdit={() => openEdit(r)}
+                    onClosedDeal={() => routeClosedDeal(r)}
+                    onDenied={() => denyAndRemove(r)}
+                    onFollowUp={() => openEdit(r)}
+                  />
+                ))}
             </Section>
           </div>
         </div>
@@ -380,10 +640,18 @@ function Card({
   r,
   due,
   onStatus,
+  onEdit,
+  onFollowUp,
+  onClosedDeal,
+  onDenied,
 }: {
   r: FollowUp
   due: boolean
   onStatus: (id: string, status: FollowUp['status']) => void
+  onEdit: () => void
+  onFollowUp: () => void
+  onClosedDeal: () => void
+  onDenied: () => void
 }) {
   const parsed = parsePackedNotes(r.notes || '')
   const dob = parsed.dob || ''
@@ -391,28 +659,32 @@ function Card({
   return (
     <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-sm font-semibold">{r.full_name || '—'}</div>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold truncate">{r.full_name || '—'}</div>
           <div className="text-xs text-white/60 mt-1">
             {r.phone || '—'} • {r.company || '—'}
           </div>
           <div className="text-xs text-white/60 mt-1">
-            {r.coverage != null ? `$${Number(r.coverage).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+            {r.coverage != null
+              ? `$${Number(r.coverage).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              : '—'}
             {' • '}
             {r.follow_up_at ? prettyDT(r.follow_up_at) : '—'}
           </div>
 
-          {dob ? (
-            <div className="text-xs text-white/60 mt-1">
-              DOB: {prettyDateOnly(dob)}
-            </div>
-          ) : null}
+          {dob ? <div className="text-xs text-white/60 mt-1">DOB: {prettyDateOnly(dob)}</div> : null}
 
           {parsed.notes ? <div className="text-xs text-white/70 mt-2">{parsed.notes}</div> : null}
         </div>
 
-        <div className="text-[11px] px-2 py-1 rounded-xl border border-white/10 bg-white/5 text-white/70">
-          {due ? 'DUE' : 'UPCOMING'}
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={onEdit} className={iconBtn} title="Edit">
+            <PencilIcon />
+          </button>
+
+          <div className="text-[11px] px-2 py-1 rounded-xl border border-white/10 bg-white/5 text-white/70">
+            {due ? 'DUE' : 'UPCOMING'}
+          </div>
         </div>
       </div>
 
@@ -420,14 +692,21 @@ function Card({
         <div className="mt-3">
           <div className="text-xs text-white/55 mb-2">Due Now</div>
           <div className="flex flex-wrap gap-2">
-            <button onClick={() => onStatus(r.id, 'completed')} className={btnGreen}>
+            <button onClick={onClosedDeal} className={btnGreen}>
               Closed Deal
             </button>
-            <button onClick={() => onStatus(r.id, 'upcoming')} className={btnYellow}>
+
+            <button onClick={onFollowUp} className={btnYellow}>
               Follow up
             </button>
-            <button onClick={() => onStatus(r.id, 'denied')} className={btnRed}>
+
+            <button onClick={onDenied} className={btnRed}>
               Denied Coverage
+            </button>
+
+            {/* keep status option (behavior-safe) */}
+            <button onClick={() => onStatus(r.id, 'completed')} className={btnGlass}>
+              Mark Completed
             </button>
           </div>
         </div>
@@ -436,12 +715,27 @@ function Card({
   )
 }
 
-function Section({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
+function Section({
+  title,
+  count,
+  children,
+  onEditInfo,
+}: {
+  title: string
+  count: number
+  children: React.ReactNode
+  onEditInfo?: () => void
+}) {
   return (
     <div className="glass rounded-2xl border border-white/10 overflow-hidden">
       <div className="px-5 py-4 bg-white/5 flex items-center justify-between">
         <div className="text-sm font-semibold">{title}</div>
-        <div className="text-xs text-white/60">{count}</div>
+        <div className="flex items-center gap-2">
+          <button onClick={onEditInfo} className={iconBtn} title="Edit list">
+            <PencilIcon />
+          </button>
+          <div className="text-xs text-white/60">{count}</div>
+        </div>
       </div>
       <div className="p-5 space-y-3">{children}</div>
     </div>
@@ -501,6 +795,15 @@ function cleanPhone(raw: string) {
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`
 }
 
+// ✅ strict phone typing: (888) 888-8888 as you type
+function formatPhone(input: string) {
+  const digits = (input || '').replace(/\D/g, '').slice(0, 10)
+  if (digits.length === 0) return ''
+  if (digits.length < 4) return `(${digits}`
+  if (digits.length < 7) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`
+}
+
 function toISODateLocal(d: Date) {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -515,14 +818,12 @@ function toTimeHHMM(d: Date) {
 }
 
 function combineLocalDateTimeISO(date: string, time: string) {
-  // date: YYYY-MM-DD, time: HH:MM
   const [y, m, d] = date.split('-').map((x) => Number(x))
   const [hh, mm] = time.split(':').map((x) => Number(x))
-  const dt = new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0, 0, 0) // LOCAL time
+  const dt = new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0, 0, 0)
   return dt.toISOString()
 }
 
-// ✅ Pack DOB into notes so we don't require follow_ups.dob column
 function buildNotes({ dob, notes }: { dob: string; notes: string }) {
   const parts: string[] = []
   if (dob) parts.push(`dob: ${dob}`)
@@ -539,7 +840,6 @@ function parsePackedNotes(raw: string) {
     const mNotes = line.match(/^notes:\s*(.+)$/i)
     if (mNotes) out.notes = mNotes[1].trim()
   }
-  // fallback: if it's plain notes and not packed
   if (!out.notes && raw && !out.dob) out.notes = raw.trim()
   return out
 }
@@ -547,6 +847,141 @@ function parsePackedNotes(raw: string) {
 function parseISODate(iso: string) {
   const [y, m, d] = iso.split('-').map((x) => Number(x))
   return new Date(y, (m || 1) - 1, d || 1)
+}
+
+/* -------- locked financial inputs (commas + decimals) -------- */
+function moneyInputLocked(v: string) {
+  const raw = String(v || '').replace(/,/g, '')
+  const cleaned = raw.replace(/[^0-9.]/g, '')
+  const parts = cleaned.split('.')
+  const a = parts[0] || ''
+  const b = (parts[1] || '').slice(0, 2)
+  return parts.length > 1 ? `${a}.${b}` : a
+}
+
+function formatMoneyInputNoDollar(v: string) {
+  const n = Number(String(v || '').replace(/[^0-9.]/g, ''))
+  if (!Number.isFinite(n)) return ''
+  return Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+/* -------- Flow-style time picker (glass) -------- */
+function FlowTimePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false)
+
+  const hh = useMemo(() => {
+    const [h] = (value || '09:00').split(':')
+    const n = Number(h)
+    return Number.isFinite(n) ? n : 9
+  }, [value])
+
+  const mm = useMemo(() => {
+    const [, m] = (value || '09:00').split(':')
+    const n = Number(m)
+    return Number.isFinite(n) ? n : 0
+  }, [value])
+
+  const hours = useMemo(() => Array.from({ length: 24 }, (_, i) => i), [])
+  const minutes = useMemo(() => Array.from({ length: 12 }, (_, i) => i * 5), [])
+
+  function set(h: number, m: number) {
+    const next = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+    onChange(next)
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((s) => !s)}
+        className="w-full text-left rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none hover:bg-white/7 transition flex items-center justify-between"
+      >
+        <span className={value ? 'text-white' : 'text-white/50'}>{value || 'Select time'}</span>
+        <span className="text-white/50">🕒</span>
+      </button>
+
+      {open && (
+        <div className="absolute z-[240] mt-2 w-full rounded-2xl border border-white/10 bg-[#0b0f1a]/95 backdrop-blur-xl shadow-2xl p-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <div className="text-[11px] text-white/55 mb-2">Hour</div>
+              <div className="grid grid-cols-6 gap-1">
+                {hours.map((h) => (
+                  <button
+                    key={h}
+                    type="button"
+                    onClick={() => set(h, mm)}
+                    className={[
+                      'h-9 rounded-xl text-xs transition border',
+                      h === hh ? 'bg-blue-600 border-blue-500/60 text-white' : 'bg-white/5 border-white/10 hover:bg-white/10',
+                    ].join(' ')}
+                  >
+                    {String(h).padStart(2, '0')}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-[11px] text-white/55 mb-2">Minute</div>
+              <div className="grid grid-cols-3 gap-1">
+                {minutes.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => set(hh, m)}
+                    className={[
+                      'h-9 rounded-xl text-xs transition border',
+                      m === mm ? 'bg-blue-600 border-blue-500/60 text-white' : 'bg-white/5 border-white/10 hover:bg-white/10',
+                    ].join(' ')}
+                  >
+                    {String(m).padStart(2, '0')}
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const n = new Date()
+                    set(n.getHours(), n.getMinutes())
+                    setOpen(false)
+                  }}
+                  className="flex-1 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-3 py-2 text-xs"
+                >
+                  Now
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="flex-1 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-3 py-2 text-xs"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-2 text-[11px] text-white/45">Glass time picker (Flow style).</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PencilIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 20h9" stroke="rgba(255,255,255,0.70)" strokeWidth="1.7" strokeLinecap="round" />
+      <path
+        d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4 11.5-11.5Z"
+        stroke="rgba(255,255,255,0.70)"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
 }
 
 const inputCls =
@@ -560,3 +995,6 @@ const btnRed = 'rounded-2xl bg-red-600 hover:bg-red-500 transition px-4 py-2 tex
 
 const saveWide =
   'mt-5 w-full rounded-2xl bg-green-600 hover:bg-green-500 transition px-4 py-3 text-sm font-semibold'
+
+const iconBtn =
+  'rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-2.5 py-2 text-xs inline-flex items-center justify-center'
