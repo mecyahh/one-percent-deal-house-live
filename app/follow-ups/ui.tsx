@@ -1,6 +1,3 @@
-// ✅ FILE: /app/follow-ups/ui.tsx
-// ✅ ACTION: REPLACE ENTIRE FILE
-
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -49,7 +46,7 @@ export default function FollowUpsClient() {
     company: '',
     coverage: '',
     follow_up_date: '', // YYYY-MM-DD
-    follow_up_time: '09:00', // HH:MM (24h)
+    follow_up_time: '09:00', // HH:MM
     notes: '',
   })
 
@@ -139,7 +136,6 @@ export default function FollowUpsClient() {
     if (dueNowList.length === 0) return
 
     let alive = true
-
     const ring = () => {
       if (!alive) return
       try {
@@ -166,13 +162,10 @@ export default function FollowUpsClient() {
     if (p === '48') base.setHours(base.getHours() + 48)
     if (p === 'week') base.setDate(base.getDate() + 7)
 
-    const yyyyMmDd = toISODateLocal(base)
-    const hhmm = toTimeHHMM(base)
-
     setForm((f) => ({
       ...f,
-      follow_up_date: yyyyMmDd,
-      follow_up_time: hhmm,
+      follow_up_date: toISODateLocal(base),
+      follow_up_time: toTimeHHMM(base),
     }))
   }
 
@@ -227,7 +220,9 @@ export default function FollowUpsClient() {
 
   // ✅ No dual-entry routing actions
   async function routeClosedDeal(r: FollowUp) {
-    await supabase.from('follow_ups').delete().eq('id', r.id).catch(() => {})
+    try {
+      await supabase.from('follow_ups').delete().eq('id', r.id)
+    } catch {}
 
     const parsed = parsePackedNotes(r.notes || '')
     const dob = parsed.dob || ''
@@ -243,8 +238,13 @@ export default function FollowUpsClient() {
   }
 
   async function denyAndRemove(r: FollowUp) {
-    await supabase.from('follow_ups').update({ status: 'denied' }).eq('id', r.id).catch(() => {})
-    await supabase.from('follow_ups').delete().eq('id', r.id).catch(() => {})
+    try {
+      await supabase.from('follow_ups').update({ status: 'denied' }).eq('id', r.id)
+    } catch {}
+    try {
+      await supabase.from('follow_ups').delete().eq('id', r.id)
+    } catch {}
+
     setToast('Removed ✅')
     load()
   }
@@ -336,7 +336,6 @@ export default function FollowUpsClient() {
         </div>
       )}
 
-      {/* ✅ EDIT / RESCHEDULE MODAL */}
       {editOpen && (
         <div className="fixed inset-0 z-[260] flex items-center justify-center bg-black/60 p-6">
           <div className="glass w-full max-w-3xl rounded-2xl border border-white/10 p-6">
@@ -358,11 +357,7 @@ export default function FollowUpsClient() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Field label="Full Name">
-                <input
-                  className={inputCls}
-                  value={editDraft.full_name}
-                  onChange={(e) => setEditDraft((d) => ({ ...d, full_name: e.target.value }))}
-                />
+                <input className={inputCls} value={editDraft.full_name} onChange={(e) => setEditDraft((d) => ({ ...d, full_name: e.target.value }))} />
               </Field>
 
               <Field label="Phone">
@@ -376,19 +371,11 @@ export default function FollowUpsClient() {
               </Field>
 
               <Field label="Client DOB">
-                <FlowDatePicker
-                  value={editDraft.dob}
-                  onChange={(v) => setEditDraft((d) => ({ ...d, dob: v }))}
-                  placeholder="Select DOB"
-                />
+                <FlowDatePicker value={editDraft.dob} onChange={(v) => setEditDraft((d) => ({ ...d, dob: v }))} placeholder="Select DOB" />
               </Field>
 
               <Field label="Company">
-                <select
-                  className={inputCls}
-                  value={editDraft.company}
-                  onChange={(e) => setEditDraft((d) => ({ ...d, company: e.target.value }))}
-                >
+                <select className={inputCls} value={editDraft.company} onChange={(e) => setEditDraft((d) => ({ ...d, company: e.target.value }))}>
                   <option value="">Select…</option>
                   {CARRIERS.map((c) => (
                     <option key={c} value={c}>
@@ -410,28 +397,17 @@ export default function FollowUpsClient() {
               </Field>
 
               <Field label="Follow Up Date">
-                <FlowDatePicker
-                  value={editDraft.follow_up_date}
-                  onChange={(v) => setEditDraft((d) => ({ ...d, follow_up_date: v }))}
-                  placeholder="Select date"
-                />
+                <FlowDatePicker value={editDraft.follow_up_date} onChange={(v) => setEditDraft((d) => ({ ...d, follow_up_date: v }))} placeholder="Select date" />
               </Field>
 
               <Field label="Follow Up Time">
-                <FlowTimePicker
-                  value={editDraft.follow_up_time}
-                  onChange={(v) => setEditDraft((d) => ({ ...d, follow_up_time: v }))}
-                />
+                <FlowTimePicker value={editDraft.follow_up_time} onChange={(v) => setEditDraft((d) => ({ ...d, follow_up_time: v }))} />
               </Field>
             </div>
 
             <div className="mt-4">
               <Field label="Notes">
-                <textarea
-                  className={`${inputCls} min-h-[110px]`}
-                  value={editDraft.notes}
-                  onChange={(e) => setEditDraft((d) => ({ ...d, notes: e.target.value }))}
-                />
+                <textarea className={`${inputCls} min-h-[110px]`} value={editDraft.notes} onChange={(e) => setEditDraft((d) => ({ ...d, notes: e.target.value }))} />
               </Field>
             </div>
 
@@ -445,11 +421,7 @@ export default function FollowUpsClient() {
               >
                 Cancel
               </button>
-              <button
-                onClick={saveEdit}
-                disabled={editSaving}
-                className={[btnGreen, editSaving ? 'opacity-50 cursor-not-allowed' : ''].join(' ')}
-              >
+              <button onClick={saveEdit} disabled={editSaving} className={[btnGreen, editSaving ? 'opacity-50 cursor-not-allowed' : ''].join(' ')}>
                 {editSaving ? 'Saving…' : 'Save'}
               </button>
             </div>
@@ -465,9 +437,7 @@ export default function FollowUpsClient() {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="rounded-2xl border border-green-400/25 bg-green-500/12 px-4 py-2 text-sm font-semibold text-green-200">
-              Alerts ON
-            </div>
+            <div className="rounded-2xl border border-green-400/25 bg-green-500/12 px-4 py-2 text-sm font-semibold text-green-200">Alerts ON</div>
 
             <button onClick={load} className={btnGlass}>
               Refresh
@@ -483,17 +453,12 @@ export default function FollowUpsClient() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* FORM */}
           <div className="glass rounded-2xl border border-white/10 p-6">
             <div className="text-sm font-semibold mb-4">Submit a Follow Up</div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Field label="Full Name">
-                <input
-                  className={inputCls}
-                  value={form.full_name}
-                  onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))}
-                />
+                <input className={inputCls} value={form.full_name} onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))} />
               </Field>
 
               <Field label="Phone">
@@ -507,19 +472,11 @@ export default function FollowUpsClient() {
               </Field>
 
               <Field label="Client DOB">
-                <FlowDatePicker
-                  value={form.dob}
-                  onChange={(v) => setForm((f) => ({ ...f, dob: v }))}
-                  placeholder="Select DOB"
-                />
+                <FlowDatePicker value={form.dob} onChange={(v) => setForm((f) => ({ ...f, dob: v }))} placeholder="Select DOB" />
               </Field>
 
               <Field label="Company">
-                <select
-                  className={inputCls}
-                  value={form.company}
-                  onChange={(e) => setForm((f) => ({ ...f, company: e.target.value }))}
-                >
+                <select className={inputCls} value={form.company} onChange={(e) => setForm((f) => ({ ...f, company: e.target.value }))}>
                   <option value="">Select…</option>
                   {CARRIERS.map((c) => (
                     <option key={c} value={c}>
@@ -579,11 +536,7 @@ export default function FollowUpsClient() {
 
             <div className="mt-4">
               <Field label="Notes">
-                <textarea
-                  className={`${inputCls} min-h-[110px]`}
-                  value={form.notes}
-                  onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-                />
+                <textarea className={`${inputCls} min-h-[110px]`} value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
               </Field>
             </div>
 
@@ -592,9 +545,8 @@ export default function FollowUpsClient() {
             </button>
           </div>
 
-          {/* LISTS */}
           <div className="space-y-6">
-            <Section title="Due Now" count={dueNowList.length} onEditInfo={() => setToast('Edit any card using the pencil icon on the right.')}>
+            <Section title="Due Now" count={dueNowList.length}>
               {loading && <Empty text="Loading…" />}
               {!loading && dueNowList.length === 0 && <Empty text="No follow ups." />}
               {!loading &&
@@ -612,7 +564,7 @@ export default function FollowUpsClient() {
                 ))}
             </Section>
 
-            <Section title="Upcoming" count={upcomingList.length} onEditInfo={() => setToast('Edit any card using the pencil icon on the right.')}>
+            <Section title="Upcoming" count={upcomingList.length}>
               {loading && <Empty text="Loading…" />}
               {!loading && upcomingList.length === 0 && <Empty text="No follow ups." />}
               {!loading &&
@@ -673,7 +625,6 @@ function Card({
           </div>
 
           {dob ? <div className="text-xs text-white/60 mt-1">DOB: {prettyDateOnly(dob)}</div> : null}
-
           {parsed.notes ? <div className="text-xs text-white/70 mt-2">{parsed.notes}</div> : null}
         </div>
 
@@ -704,7 +655,6 @@ function Card({
               Denied Coverage
             </button>
 
-            {/* keep status option (behavior-safe) */}
             <button onClick={() => onStatus(r.id, 'completed')} className={btnGlass}>
               Mark Completed
             </button>
@@ -715,27 +665,12 @@ function Card({
   )
 }
 
-function Section({
-  title,
-  count,
-  children,
-  onEditInfo,
-}: {
-  title: string
-  count: number
-  children: React.ReactNode
-  onEditInfo?: () => void
-}) {
+function Section({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
   return (
     <div className="glass rounded-2xl border border-white/10 overflow-hidden">
       <div className="px-5 py-4 bg-white/5 flex items-center justify-between">
         <div className="text-sm font-semibold">{title}</div>
-        <div className="flex items-center gap-2">
-          <button onClick={onEditInfo} className={iconBtn} title="Edit list">
-            <PencilIcon />
-          </button>
-          <div className="text-xs text-white/60">{count}</div>
-        </div>
+        <div className="text-xs text-white/60">{count}</div>
       </div>
       <div className="p-5 space-y-3">{children}</div>
     </div>
@@ -795,7 +730,6 @@ function cleanPhone(raw: string) {
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`
 }
 
-// ✅ strict phone typing: (888) 888-8888 as you type
 function formatPhone(input: string) {
   const digits = (input || '').replace(/\D/g, '').slice(0, 10)
   if (digits.length === 0) return ''
@@ -849,7 +783,6 @@ function parseISODate(iso: string) {
   return new Date(y, (m || 1) - 1, d || 1)
 }
 
-/* -------- locked financial inputs (commas + decimals) -------- */
 function moneyInputLocked(v: string) {
   const raw = String(v || '').replace(/,/g, '')
   const cleaned = raw.replace(/[^0-9.]/g, '')
@@ -865,7 +798,6 @@ function formatMoneyInputNoDollar(v: string) {
   return Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-/* -------- Flow-style time picker (glass) -------- */
 function FlowTimePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false)
 
@@ -952,11 +884,7 @@ function FlowTimePicker({ value, onChange }: { value: string; onChange: (v: stri
                 >
                   Now
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setOpen(false)}
-                  className="flex-1 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-3 py-2 text-xs"
-                >
+                <button type="button" onClick={() => setOpen(false)} className="flex-1 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-3 py-2 text-xs">
                   Done
                 </button>
               </div>
