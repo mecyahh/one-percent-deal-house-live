@@ -378,7 +378,7 @@ export default function DashboardPage() {
   const weekDeals = useMemo(() => parsed.filter((d) => d.dt >= weekStart), [parsed, weekStart])
   const monthDeals = useMemo(() => parsed.filter((d) => d.dt >= monthStart), [parsed, monthStart])
 
-  // ✅ Production (AP) card rules:
+  // ✅ Production card rules:
   // - solo agent: personal only (already enforced by deals query)
   // - agent with downlines: team (enforced by deals query)
   // - owner/admin: all (unchanged)
@@ -632,10 +632,10 @@ export default function DashboardPage() {
             <MiniStat
               label={
                 me?.role === 'admin' || me?.is_agency_owner
-                  ? 'Production (AP)'
+                  ? 'Production'
                   : teamIds && teamIds.length > 1
-                  ? 'Team Production (AP)'
-                  : 'My Production (AP)'
+                  ? 'Team Production'
+                  : 'My Production'
               }
               value={loading ? '—' : `$${formatMoney(production)}`}
             />
@@ -750,9 +750,9 @@ export default function DashboardPage() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <KPI title="Today’s Production (AP)" value={loading ? '—' : `$${formatMoney(todayAP)}`} />
-                <KPI title="This Week’s Production (AP)" value={loading ? '—' : `$${formatMoney(weekAP)}`} />
-                <KPI title="This Month’s Production (AP)" value={loading ? '—' : `$${formatMoney(monthAP)}`} />
+                <KPI title="Today’s Production" value={loading ? '—' : `$${formatMoney(todayAP)}`} />
+                <KPI title="This Week’s Production" value={loading ? '—' : `$${formatMoney(weekAP)}`} />
+                <KPI title="This Month’s Production" value={loading ? '—' : `$${formatMoney(monthAP)}`} />
               </div>
             </div>
 
@@ -867,7 +867,7 @@ function Leader({
 
         <div className="min-w-0">
           <div className={`${highlight ? 'text-base font-semibold' : 'text-sm font-medium'} truncate`}>{name}</div>
-          <div className="text-xs text-white/50">Monthly production (AP)</div>
+          <div className="text-xs text-white/50">Monthly Production</div>
         </div>
       </div>
 
