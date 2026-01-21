@@ -6,16 +6,6 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 
-/**
- * ✅ Per requirements:
- * - NO invisible sidebar (always visible)
- * - NO light mode
- * - Logout hover = red glass
- * - Large profile icon synced to the user’s profile picture (per account)
- * - Clean, slightly smaller nav text
- * - Keep overall format/behavior consistent with your existing sidebar pattern
- */
-
 const NAV = [
   { label: 'Dashboard', href: '/dashboard' },
   { label: 'Leaderboard', href: '/leaderboard' },
@@ -38,58 +28,92 @@ export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
 
+  // ✅ Hide sidebar on auth screens
+  const hideOnRoutes = useMemo(() => {
+    // add more routes here if needed
+    const HIDE = ['/login', '/signup', '/forgot-password']
+    return HIDE.some((r) => pathname === r || pathname.startsWith(r + '/'))
+  }, [pathname])
+
+  // ✅ Only render when logged in
+  const [ready, setReady] = useState(false)
+  const [authed, setAuthed] = useState(false)
+
+  // ✅ Profile (big + sync)
   const [me, setMe] = useState<Me | null>(null)
 
   useEffect(() => {
     let alive = true
 
+    async function hydrateFromUser(u: any | null) {
+      if (!alive) return
+
+      if (!u) {
+        setAuthed(false)
+        setMe(null)
+        setReady(true)
+        return
+      }
+
+      setAuthed(true)
+
+      // Try profiles.avatar_url first, fallback to auth metadata
+      let avatarUrl = ''
+      let fullName = ''
+      let email = u.email || ''
+
+      try {
+        const { data: prof, error } = await supabase
+          .from('profiles')
+          .select('first_name,last_name,email,avatar_url')
+          .eq('id', u.id)
+          .single()
+
+        if (!error && prof) {
+          fullName = `${(prof as any).first_name || ''} ${(prof as any).last_name || ''}`.trim()
+          email = String((prof as any).email || email || '')
+          avatarUrl = String((prof as any).avatar_url || '')
+        }
+      } catch {
+        // ignore; fallback below
+      }
+
+      const meta: any = u.user_metadata || {}
+      if (!avatarUrl) avatarUrl = String(meta.avatar_url || meta.picture || meta.photoURL || '')
+      if (!fullName) fullName = String(meta.full_name || meta.name || '').trim()
+
+      const name = fullName || (email ? email.split('@')[0] : 'Agent')
+
+      if (!alive) return
+      setMe({
+        id: u.id,
+        name,
+        email: email || '',
+        avatarUrl,
+      })
+      setReady(true)
+    }
+
     ;(async () => {
       try {
-        const { data: uRes } = await supabase.auth.getUser()
-        const u = uRes.user
-        if (!u) return
-
-        // Try profiles.avatar_url first, fallback to auth metadata
-        let avatarUrl = ''
-        let fullName = ''
-        let email = u.email || ''
-
-        try {
-          const { data: prof, error } = await supabase
-            .from('profiles')
-            .select('first_name,last_name,email,avatar_url')
-            .eq('id', u.id)
-            .single()
-
-          if (!error && prof) {
-            fullName = `${(prof as any).first_name || ''} ${(prof as any).last_name || ''}`.trim()
-            email = String((prof as any).email || email || '')
-            avatarUrl = String((prof as any).avatar_url || '')
-          }
-        } catch {
-          // ignore; fallback below
-        }
-
-        const meta: any = u.user_metadata || {}
-        if (!avatarUrl) avatarUrl = String(meta.avatar_url || meta.picture || meta.photoURL || '')
-        if (!fullName) fullName = String(meta.full_name || meta.name || '').trim()
-
-        const name = fullName || (email ? email.split('@')[0] : 'Agent')
-
-        if (!alive) return
-        setMe({
-          id: u.id,
-          name,
-          email: email || '',
-          avatarUrl,
-        })
+        const { data } = await supabase.auth.getUser()
+        await hydrateFromUser(data.user || null)
       } catch {
-        // ignore
+        if (!alive) return
+        setAuthed(false)
+        setMe(null)
+        setReady(true)
       }
     })()
 
+    // ✅ keep in sync with auth changes (login/logout)
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      hydrateFromUser(session?.user || null)
+    })
+
     return () => {
       alive = false
+      sub.subscription.unsubscribe()
     }
   }, [])
 
@@ -110,9 +134,14 @@ export default function Sidebar() {
     router.refresh()
   }
 
+  // ✅ Don’t show on login/auth pages OR when not authed OR before we know
+  if (hideOnRoutes) return null
+  if (!ready) return null
+  if (!authed) return null
+
   return (
     <aside className="fixed left-0 top-0 z-40 h-screen w-72 p-6 border-r border-white/10 bg-[#070a12]/92 backdrop-blur-xl">
-      {/* ✅ Header (profile + brand) */}
+      {/* Header */}
       <div className="mb-7 flex items-center gap-4">
         {/* ✅ Large profile icon */}
         <div className="relative h-20 w-20 rounded-full overflow-hidden border border-white/10 bg-white/5">
@@ -130,7 +159,6 @@ export default function Sidebar() {
             </div>
           )}
 
-          {/* subtle glow */}
           <div className="pointer-events-none absolute inset-0">
             <div className="absolute -inset-10 rounded-full bg-white/5 blur-2xl" />
           </div>
@@ -138,13 +166,11 @@ export default function Sidebar() {
 
         <div className="min-w-0">
           <div className="text-lg font-semibold tracking-tight leading-tight">Flow</div>
-          <div className="text-[11px] text-white/55 mt-1 truncate">
-            {me?.name ? me.name : 'Deal tracking'}
-          </div>
+          <div className="text-[11px] text-white/55 mt-1 truncate">{me?.name ? me.name : 'Deal tracking'}</div>
         </div>
       </div>
 
-      {/* ✅ Nav */}
+      {/* Nav */}
       <nav className="flex flex-col gap-1.5">
         {NAV.map((item) => {
           const active = pathname === item.href
@@ -154,7 +180,7 @@ export default function Sidebar() {
               href={item.href}
               className={[
                 'rounded-xl px-4 py-3 transition border flex items-center justify-between',
-                'text-[12.5px] font-medium', // slightly smaller for a cleaner look
+                'text-[12.5px] font-medium',
                 active
                   ? 'bg-white/10 border-white/15'
                   : 'bg-transparent border-transparent hover:bg-white/5 hover:border-white/10',
@@ -175,7 +201,7 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* ✅ Bottom: Logout only (no v1, no close button) */}
+      {/* Bottom */}
       <div className="absolute bottom-6 left-6 right-6">
         <div className="h-px bg-white/10 mb-4" />
 
@@ -189,7 +215,6 @@ export default function Sidebar() {
           Logout
         </button>
 
-        {/* ✅ optional subtle compliance/footer space (no text) */}
         <div className="mt-3 h-2" />
       </div>
     </aside>
