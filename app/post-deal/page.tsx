@@ -316,7 +316,7 @@ export default function PostDealPage() {
                     <input className={inputCls} value={full_name} onChange={(e) => setFullName(e.target.value)} placeholder="Client name" />
                   </Field>
 
-                  <Field label="Phone (locked — cannot be re-used)">
+                  <Field >
                     <input
                       className={inputCls}
                       value={phone}
@@ -324,7 +324,6 @@ export default function PostDealPage() {
                       placeholder="(888) 888-8888"
                       inputMode="tel"
                     />
-                    <div className="mt-2 text-[11px] text-white/45">Once posted, this phone cannot be submitted again.</div>
                   </Field>
 
                   {/* ✅ DOB + Effective now have TYPEABLE MM/DD/YYYY + FlowDatePicker */}
