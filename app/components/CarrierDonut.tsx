@@ -11,10 +11,12 @@ export default function CarrierDonut({
   labels,
   values,
   glow = false,
+  colors,
 }: {
   labels: string[]
   values: number[]
   glow?: boolean
+  colors?: string[]
 }) {
   const safeLabels = labels.length ? labels : ['No Data']
   const safeValues = values.length ? values : [100]
@@ -33,31 +35,28 @@ export default function CarrierDonut({
     return { name: safeLabels[idx], pct }
   }, [safeLabels, safeValues])
 
-  const palette = [
-    'rgba(59,130,246,0.85)', // blue
-    'rgba(34,197,94,0.85)', // green
-    'rgba(245,158,11,0.85)', // amber
-    'rgba(255,255,255,0.22)', // neutral
-    'rgba(14,165,233,0.75)',
-    'rgba(16,185,129,0.75)',
-    'rgba(249,115,22,0.75)',
-  ]
+  // ✅ Default palette = your requested colors (in order)
+// Kelly green, Fuchsia, Red, Orange, Blue, Teal
+const defaultPalette = ['#4CBB17', '#FF00FF', '#EF4444', '#F97316', '#3B82F6', '#14B8A6']
+
+// allow override from parent
+const palette = (colors && colors.length ? colors : defaultPalette).slice()
 
   const data = useMemo(() => {
-    return {
-      labels: safeLabels,
-      datasets: [
-        {
-          data: safeValues,
-          backgroundColor: safeValues.map((_, i) => palette[i % palette.length]),
-          borderWidth: 1,
-          borderColor: 'rgba(255,255,255,0.10)',
-          hoverOffset: 8,
-          cutout: '72%',
-        },
-      ],
-    }
-  }, [safeLabels, safeValues])
+  return {
+    labels: safeLabels,
+    datasets: [
+      {
+        data: safeValues,
+        backgroundColor: safeValues.map((_, i) => palette[i % palette.length]),
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.10)',
+        hoverOffset: 8,
+        cutout: '72%',
+      },
+    ],
+  }
+}, [safeLabels, safeValues, palette])
 
   const glowPlugin = useMemo(() => {
     return {
