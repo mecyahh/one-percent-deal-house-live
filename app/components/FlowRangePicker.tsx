@@ -5,6 +5,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 type PresetKey =
+  | 'TODAY'
+  | 'YESTERDAY'
   | 'THIS_WEEK'
   | 'LAST_WEEK'
   | 'PAST_7'
@@ -18,6 +20,10 @@ type PresetKey =
   | 'YTD'
 
 const PRESETS: { key: PresetKey; label: string }[] = [
+  // ✅ NEW: Today + Yesterday at the very top
+  { key: 'TODAY', label: 'Today' },
+  { key: 'YESTERDAY', label: 'Yesterday' },
+
   { key: 'THIS_WEEK', label: 'This Week' },
   { key: 'LAST_WEEK', label: 'Last Week' },
   { key: 'PAST_7', label: 'Past 7 Days' },
@@ -67,7 +73,7 @@ export default function FlowRangePicker({
   const anchorRef = useRef<HTMLDivElement | null>(null)
   const popRef = useRef<HTMLDivElement | null>(null)
 
-  // ✅ NEW: preset dropdown is portaled too
+  // ✅ preset dropdown is portaled too
   const presetRef = useRef<HTMLDivElement | null>(null)
   const [presetPos, setPresetPos] = useState({ top: 0, left: 0 })
 
@@ -116,7 +122,7 @@ export default function FlowRangePicker({
     setViewMonth(d.getMonth())
   }, [open, activeISO])
 
-  // ✅ calendar popover positioning
+  // calendar popover positioning
   useEffect(() => {
     if (!open) return
     function place() {
@@ -149,7 +155,7 @@ export default function FlowRangePicker({
     }
   }, [open])
 
-  // ✅ NEW: preset dropdown positioning (portaled, fixed)
+  // preset dropdown positioning (portaled, fixed)
   useEffect(() => {
     if (!presetOpen) return
     const root = anchorRef.current
@@ -160,7 +166,7 @@ export default function FlowRangePicker({
 
     const gap = 8
     const width = 224 // w-56
-    const height = 360
+    const height = 420 // enough room for Today/Yesterday etc.
 
     const vw = window.innerWidth
     const vh = window.innerHeight
@@ -175,7 +181,7 @@ export default function FlowRangePicker({
     setPresetPos({ top, left })
   }, [presetOpen])
 
-  // ✅ NEW: outside click close supports both portaled dropdown + calendar
+  // outside click close supports both portaled dropdown + calendar
   useEffect(() => {
     function onDocDown(e: MouseEvent) {
       const t = e.target as Node
@@ -241,7 +247,6 @@ export default function FlowRangePicker({
       className="fixed z-[2147483647] w-[320px] rounded-2xl border border-white/10 bg-[#0b0f1a]/95 backdrop-blur-xl shadow-2xl overflow-hidden"
       style={{ top: pos.top, left: pos.left }}
     >
-      {/* top: start/end toggle */}
       <div className="px-3 py-2 flex items-center justify-between border-b border-white/10">
         <div className="flex items-center gap-2">
           <button
@@ -277,7 +282,6 @@ export default function FlowRangePicker({
         </div>
       </div>
 
-      {/* calendar header */}
       <div className="px-4 py-3 flex items-center justify-between border-b border-white/10">
         <button
           type="button"
@@ -324,7 +328,6 @@ export default function FlowRangePicker({
         </button>
       </div>
 
-      {/* grid */}
       <div className="px-4 py-3">
         <div className="grid grid-cols-7 gap-1 text-[11px] text-white/50 mb-2">
           {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
@@ -429,7 +432,6 @@ export default function FlowRangePicker({
   return (
     <div ref={anchorRef} className="relative inline-flex items-center">
       <div className="inline-flex items-center rounded-md border border-white/10 bg-white/5 overflow-hidden">
-        {/* Preset */}
         <button
           data-preset-trigger="true"
           type="button"
@@ -442,10 +444,8 @@ export default function FlowRangePicker({
           <span className="text-white/50">▾</span>
         </button>
 
-        {/* Divider */}
         <div className="w-px self-stretch bg-white/10" />
 
-        {/* Range */}
         <button
           type="button"
           onClick={() => {
@@ -462,7 +462,6 @@ export default function FlowRangePicker({
         </button>
       </div>
 
-      {/* ✅ Portaled dropdown + calendar */}
       {presetDropdown}
       {typeof document !== 'undefined' && calendarPopover ? createPortal(calendarPopover, document.body) : null}
     </div>
@@ -591,6 +590,15 @@ function getPresetRange(key: PresetKey): { start: string; end: string } {
   now.setHours(0, 0, 0, 0)
 
   switch (key) {
+    case 'TODAY': {
+      const t = toISO(now)
+      return { start: t, end: t }
+    }
+    case 'YESTERDAY': {
+      const y = addDays(now, -1)
+      const t = toISO(y)
+      return { start: t, end: t }
+    }
     case 'THIS_WEEK':
       return { start: toISO(startOfWeekMon(now)), end: toISO(endOfWeekSun(now)) }
     case 'LAST_WEEK': {
@@ -617,8 +625,10 @@ function getPresetRange(key: PresetKey): { start: string; end: string } {
       return { start: toISO(addMonths(now, -12)), end: toISO(now) }
     case 'YTD':
       return { start: toISO(startOfYear(now)), end: toISO(now) }
-    default:
-      return { start: toISO(now), end: toISO(now) }
+    default: {
+      const t = toISO(now)
+      return { start: t, end: t }
+    }
   }
 }
 
