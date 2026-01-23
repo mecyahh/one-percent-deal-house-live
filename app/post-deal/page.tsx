@@ -316,15 +316,15 @@ export default function PostDealPage() {
                     <input className={inputCls} value={full_name} onChange={(e) => setFullName(e.target.value)} placeholder="Client name" />
                   </Field>
 
-                  <Field >
-                    <input
-                      className={inputCls}
-                      value={phone}
-                      onChange={(e) => setPhone(formatPhone(e.target.value))}
-                      placeholder="(888) 888-8888"
-                      inputMode="tel"
-                    />
-                  </Field>
+                  <Field label="Phone Number">
+  <input
+    className={inputCls}
+    value={phone}
+    onChange={(e) => setPhone(formatPhone(e.target.value))}
+    placeholder="(888) 888-8888"
+    inputMode="tel"
+  />
+</Field>
 
                   {/* ✅ DOB + Effective now have TYPEABLE MM/DD/YYYY + FlowDatePicker */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
