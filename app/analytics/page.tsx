@@ -1,11 +1,10 @@
-// /app/analytics/page.tsx
 'use client'
 
 export const dynamic = 'force-dynamic'
 
-import { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import Sidebar from '../components/Sidebar'
-import FlowDatePicker from '@/app/components/FlowDatePicker'
+import FlowRangePicker from '@/app/components/FlowRangePicker'
 import { supabase } from '@/lib/supabaseClient'
 
 type Profile = {
@@ -15,6 +14,7 @@ type Profile = {
   last_name: string | null
   role: string | null
   is_agency_owner: boolean | null
+  upline_id?: string | null
 }
 
 type DealRow = {
@@ -28,68 +28,34 @@ type DealRow = {
 type ParsedDeal = DealRow & {
   dt: Date
   premiumNum: number
-  apNum: number
+  annualNum: number
   companySafe: string
   agentSafe: string
 }
 
-const WEEKLY_UNDER_AP = 5000
+const UNDER_5K_ANNUAL = 5000
 
 export default function AnalyticsPage() {
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState<string | null>(null)
 
-   const [me, setMe] = useState<Profile | null>(null)
+  const [me, setMe] = useState<Profile | null>(null)
   const [agents, setAgents] = useState<Profile[]>([])
   const [deals, setDeals] = useState<DealRow[]>([])
 
-  // ✅ For non-admins: show my analytics + downlines (team scope)
+  // ✅ Range string: "YYYY-MM-DD|YYYY-MM-DD" (inclusive end)
+  const [rangeValue, setRangeValue] = useState<string>('')
+
+  // ✅ collapsibles
+  const [underOpen, setUnderOpen] = useState(false)
+  const [nonWriterOpen, setNonWriterOpen] = useState(false)
+
+  // ✅ team scope for agents (self + downlines). For admin/owner, null = all.
   const [teamIds, setTeamIds] = useState<string[] | null>(null)
 
-  // ✅ Collapsible cards
-  const [underOpen, setUnderOpen] = useState(false)
-  const [nonWritersOpen, setNonWritersOpen] = useState(false)
-
-  // Range (single global range controls EVERYTHING)
-  const [rangeMode, setRangeMode] = useState<'this_week' | 'last_7' | 'this_month' | 'custom'>('this_week')
-  const [rangeStart, setRangeStart] = useState('')
-  const [rangeEnd, setRangeEnd] = useState('')
-
-  // keep range synced w/ presets
-  useEffect(() => {
-    const now = new Date()
-    const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
-    const startOfWeek = (d: Date) => {
-      const day = d.getDay()
-      const diff = day === 0 ? -6 : 1 - day
-      const base = new Date(d)
-      base.setDate(d.getDate() + diff)
-      return startOfDay(base)
-    }
-    const startOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1)
-
-    if (rangeMode === 'custom') return
-
-    let s = new Date()
-    let e = new Date()
-    if (rangeMode === 'this_week') {
-      s = startOfWeek(now)
-      e = new Date(startOfDay(now))
-      e.setDate(e.getDate() + 1) // exclusive end (tomorrow 00:00)
-    } else if (rangeMode === 'last_7') {
-      e = new Date(startOfDay(now))
-      e.setDate(e.getDate() + 1)
-      s = new Date(e)
-      s.setDate(s.getDate() - 7)
-    } else {
-      s = startOfMonth(now)
-      e = new Date(startOfDay(now))
-      e.setDate(e.getDate() + 1)
-    }
-
-    setRangeStart(toISODate(s))
-    setRangeEnd(toISODate(e))
-  }, [rangeMode])
+  const isAdminOrOwner = useMemo(() => {
+    return !!(me && (me.role === 'admin' || me.is_agency_owner))
+  }, [me])
 
   useEffect(() => {
     boot()
@@ -97,10 +63,27 @@ export default function AnalyticsPage() {
   }, [])
 
   useEffect(() => {
-    if (!me) return
+    if (!me?.id) return
+    ;(async () => {
+      // compute team ids for non-admin/owner
+      if (isAdminOrOwner) {
+        setTeamIds(null)
+        return
+      }
+      try {
+        const ids = await buildTeamIds(me.id)
+        setTeamIds(ids)
+      } catch {
+        setTeamIds([me.id])
+      }
+    })()
+  }, [me?.id, isAdminOrOwner])
+
+  useEffect(() => {
+    if (!me?.id) return
     loadData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me?.id, me?.role, me?.is_agency_owner, rangeStart, rangeEnd])
+  }, [me?.id, isAdminOrOwner, teamIds, rangeValue])
 
   async function boot() {
     setLoading(true)
@@ -114,7 +97,7 @@ export default function AnalyticsPage() {
 
     const { data: prof, error: pErr } = await supabase
       .from('profiles')
-      .select('id,email,first_name,last_name,role,is_agency_owner')
+      .select('id,email,first_name,last_name,role,is_agency_owner,upline_id')
       .eq('id', user.id)
       .single()
 
@@ -128,57 +111,96 @@ export default function AnalyticsPage() {
     setLoading(false)
   }
 
+  async function buildTeamIds(rootId: string) {
+    const { data, error } = await supabase.from('profiles').select('id,upline_id').limit(50000)
+    if (error || !data) return [rootId]
+
+    const children = new Map<string, string[]>()
+    ;(data as any[]).forEach((p) => {
+      const up = p.upline_id || null
+      if (!up) return
+      if (!children.has(up)) children.set(up, [])
+      children.get(up)!.push(p.id)
+    })
+
+    const out: string[] = []
+    const q: string[] = [rootId]
+    const seen = new Set<string>()
+    while (q.length) {
+      const cur = q.shift()!
+      if (seen.has(cur)) continue
+      seen.add(cur)
+      out.push(cur)
+      const kids = children.get(cur) || []
+      kids.forEach((k) => q.push(k))
+      if (out.length > 2500) break
+    }
+    return out
+  }
+
+  function parseRange(value: string) {
+    if (!value) return { start: '', end: '' }
+    const [a, b] = value.split('|')
+    if (!a) return { start: '', end: '' }
+    return { start: a, end: b || a }
+  }
+
+  const parsedRange = useMemo(() => parseRange(rangeValue), [rangeValue])
+
+  // ✅ query boundaries:
+  // - start inclusive at 00:00
+  // - end EXCLUSIVE = (endInclusive + 1 day) at 00:00
+  const queryStartISO = useMemo(() => {
+    if (!parsedRange.start) return '1900-01-01T00:00:00.000Z'
+    return new Date(parsedRange.start + 'T00:00:00').toISOString()
+  }, [parsedRange.start])
+
+  const queryEndISO = useMemo(() => {
+    if (!parsedRange.end) return '2999-12-31T00:00:00.000Z'
+    const d = new Date(parsedRange.end + 'T00:00:00')
+    d.setDate(d.getDate() + 1) // exclusive boundary
+    return d.toISOString()
+  }, [parsedRange.end])
+
   async function loadData() {
     if (!me) return
     setLoading(true)
     setToast(null)
 
-    const isTeam = (me.is_agency_owner || me.role === 'admin') === true
+    // ✅ agents directory:
+    // - admin/owner: load all (for non-writers, names, etc.)
+    // - agent: load at least their team IDs for display names (fallback to all if that fails)
+    try {
+      const base = supabase
+        .from('profiles')
+        .select('id,email,first_name,last_name,role,is_agency_owner,upline_id')
+        .order('created_at', { ascending: false })
+        .limit(5000)
 
-    // Load full directory (we need upline graph even for agents)
-    const { data: aData, error: aErr } = await supabase
-      .from('profiles')
-      .select('id,email,first_name,last_name,role,is_agency_owner,upline_id')
-      .order('created_at', { ascending: false })
-      .limit(50000)
+      const { data: aData } =
+        isAdminOrOwner || !teamIds || teamIds.length === 0 ? await base : await base.in('id', teamIds)
 
-    const directory = (!aErr && aData ? (aData as any[]) : []) as any[]
-
-    // ✅ Build team scope for non-admins: me + downlines (BFS)
-    let computedTeamIds: string[] = me.id ? [me.id] : []
-    if (!isTeam && me.id) {
-      try {
-        computedTeamIds = buildTeamIdsFromDirectory(me.id, directory)
-      } catch {
-        computedTeamIds = [me.id]
-      }
+      setAgents((aData || []) as Profile[])
+    } catch {
+      setAgents([])
     }
 
-    setTeamIds(isTeam ? null : computedTeamIds)
-
-    // ✅ Agents list in UI:
-    // - admins: full directory
-    // - agents: only me + downlines
-    const filteredAgents = isTeam
-      ? directory
-      : directory.filter((p) => computedTeamIds.includes(String(p.id)))
-
-    setAgents(filteredAgents as any)
-
-    // Deals
+    // Deals query (RLS):
     const q = supabase
       .from('deals')
       .select('id,created_at,agent_id,premium,company')
-      .gte('created_at', rangeStart ? new Date(rangeStart).toISOString() : '1900-01-01T00:00:00.000Z')
-      .lt('created_at', rangeEnd ? new Date(rangeEnd).toISOString() : '2999-12-31T00:00:00.000Z')
+      .gte('created_at', queryStartISO)
+      .lt('created_at', queryEndISO)
       .order('created_at', { ascending: true })
       .limit(20000)
 
-    const { data: dData, error: dErr } = isTeam
-      ? await q
-      : computedTeamIds.length > 0
-        ? await q.in('agent_id', computedTeamIds)
-        : await q.eq('agent_id', me.id)
+    // ✅ Scope rules:
+    // - admin/owner: all deals (as before)
+    // - agent: their team (self + downlines). If no teamIds computed, fallback to self.
+    const scoped =
+      isAdminOrOwner ? q : teamIds && teamIds.length > 0 ? q.in('agent_id', teamIds) : q.eq('agent_id', me.id)
+
+    const { data: dData, error: dErr } = await scoped
 
     if (dErr) {
       setDeals([])
@@ -200,6 +222,7 @@ export default function AnalyticsPage() {
   const parsed = useMemo((): ParsedDeal[] => {
     return deals.map((d) => {
       const dt = d.created_at ? new Date(d.created_at) : new Date()
+
       const premiumNum =
         typeof d.premium === 'number'
           ? d.premium
@@ -208,46 +231,49 @@ export default function AnalyticsPage() {
           : Number(d.premium || 0)
 
       const p = Number.isFinite(premiumNum) ? premiumNum : 0
+      const annual = p * 12
+
       const companySafe = (d.company || 'Other').trim() || 'Other'
 
       const prof = d.agent_id ? agentsById.get(d.agent_id) : null
       const agentSafe = prof ? displayName(prof) : d.agent_id ? 'Agent' : '—'
 
-            const apNum = p * 12
-
       return {
         ...d,
         dt,
         premiumNum: p,
-        apNum,
+        annualNum: annual,
         companySafe,
         agentSafe,
       }
     })
   }, [deals, agentsById])
 
-    // ✅ KPIs
-  // - Total AP uses *12 rule
-  // - Avg Premium / Deal uses raw premium (NOT annualized)
-  const totalAP = useMemo(() => parsed.reduce((s, d) => s + d.apNum, 0), [parsed])
-  const totalPremium = useMemo(() => parsed.reduce((s, d) => s + d.premiumNum, 0), [parsed])
+  /* ---------------- KPIs ---------------- */
 
+  // ✅ Annual totals everywhere except Avg Premium/Deal
+  const totalAnnual = useMemo(() => parsed.reduce((s, d) => s + d.annualNum, 0), [parsed])
   const dealsCount = parsed.length
-  const avgPremiumPerDeal = dealsCount ? totalPremium / dealsCount : 0
+  const avgPremiumPerDeal = dealsCount ? parsed.reduce((s, d) => s + d.premiumNum, 0) / dealsCount : 0
 
-  // per-agent aggregation (even for agent view, still useful)
   const perAgent = useMemo(() => {
     const map = new Map<
       string,
-      { agent_id: string; name: string; ap: number; deals: number; dts: number[] }
+      { agent_id: string; name: string; annual: number; premium: number; deals: number; dts: number[] }
     >()
 
     parsed.forEach((d) => {
       const aid = d.agent_id || 'unknown'
-      const name = d.agent_id ? (agentsById.get(d.agent_id) ? displayName(agentsById.get(d.agent_id)!) : d.agentSafe) : '—'
-      if (!map.has(aid)) map.set(aid, { agent_id: aid, name, ap: 0, deals: 0, dts: [] })
+      const name = d.agent_id
+        ? agentsById.get(d.agent_id)
+          ? displayName(agentsById.get(d.agent_id)!)
+          : d.agentSafe
+        : '—'
+
+      if (!map.has(aid)) map.set(aid, { agent_id: aid, name, annual: 0, premium: 0, deals: 0, dts: [] })
       const row = map.get(aid)!
-      row.ap += d.apNum
+      row.premium += d.premiumNum
+      row.annual += d.annualNum
       row.deals += 1
       row.dts.push(d.dt.getTime())
     })
@@ -257,21 +283,22 @@ export default function AnalyticsPage() {
       const diffs: number[] = []
       for (let i = 1; i < r.dts.length; i++) diffs.push(r.dts[i] - r.dts[i - 1])
       const avgMs = diffs.length ? diffs.reduce((s, x) => s + x, 0) / diffs.length : 0
+
       return {
         ...r,
         avgGapMs: avgMs,
-        avgAP: r.deals ? r.ap / r.deals : 0,
+        avgAnnualPerDeal: r.deals ? r.annual / r.deals : 0,
       }
     })
 
-    rows.sort((a, b) => b.ap - a.ap)
+    rows.sort((a, b) => b.annual - a.annual)
     return rows
   }, [parsed, agentsById])
 
-  const avgAPPerAgent = useMemo(() => {
-    const active = perAgent.filter((a) => a.deals > 0)
+  const avgAnnualPerAgent = useMemo(() => {
+    const active = perAgent.filter((a) => a.deals > 0 && a.agent_id !== 'unknown')
     if (!active.length) return 0
-    return active.reduce((s, a) => s + a.avgAP, 0) / active.length
+    return active.reduce((s, a) => s + (a.annual || 0), 0) / active.length
   }, [perAgent])
 
   const avgTimeBetweenDeals = useMemo(() => {
@@ -282,30 +309,23 @@ export default function AnalyticsPage() {
 
   const under5kAgents = useMemo(() => {
     return perAgent
-      .filter((a) => a.agent_id !== 'unknown' && a.ap < WEEKLY_UNDER_AP)
+      .filter((a) => a.agent_id !== 'unknown' && a.annual < UNDER_5K_ANNUAL)
       .slice()
-      .sort((a, b) => a.ap - b.ap)
+      .sort((a, b) => a.annual - b.annual)
   }, [perAgent])
 
   const nonWriters = useMemo(() => {
-    // agency directory minus anyone with deals in range
     const activeIds = new Set(perAgent.filter((a) => a.deals > 0).map((a) => a.agent_id))
     const list = agents
       .filter((a) => !activeIds.has(a.id))
-      .map((a) => ({
-        id: a.id,
-        name: displayName(a),
-        email: a.email || '',
-      }))
+      .map((a) => ({ id: a.id, name: displayName(a), email: a.email || '' }))
       .sort((x, y) => x.name.localeCompare(y.name))
     return list
   }, [agents, perAgent])
 
-    // Top Carrier
   const topCarrier = useMemo(() => {
     const m = new Map<string, number>()
-    parsed.forEach((d) => m.set(d.companySafe, (m.get(d.companySafe) || 0) + d.premiumNum))
-
+    parsed.forEach((d) => m.set(d.companySafe, (m.get(d.companySafe) || 0) + d.annualNum))
     let best = '—'
     let bestVal = 0
     for (const [k, v] of m.entries()) {
@@ -317,18 +337,18 @@ export default function AnalyticsPage() {
     return bestVal ? best : '—'
   }, [parsed])
 
-  // Trend (daily AP)
-  const dailyAP = useMemo(() => {
-    const start = rangeStart ? new Date(rangeStart) : new Date()
-    const end = rangeEnd ? new Date(rangeEnd) : new Date()
-    const days = clampDays(diffDays(start, end), 1, 62)
+  // Daily trend uses ANNUAL
+  const dailyAnnual = useMemo(() => {
+    const s = parsedRange.start ? new Date(parsedRange.start + 'T00:00:00') : new Date()
+    const e = parsedRange.end ? new Date(parsedRange.end + 'T00:00:00') : new Date()
+    const days = clampDays(diffDays(s, e) + 1, 1, 62)
 
-    const out: { label: string; ap: number }[] = []
+    const out: { label: string; v: number }[] = []
     for (let i = 0; i < days; i++) {
-      const d = new Date(start)
+      const d = new Date(s)
       d.setDate(d.getDate() + i)
-      const key = toISODate(d)
-      out.push({ label: key, ap: 0 })
+      const key = toISODateLocal(d)
+      out.push({ label: key, v: 0 })
     }
 
     const idx = new Map<string, number>()
@@ -337,27 +357,27 @@ export default function AnalyticsPage() {
     parsed.forEach((d) => {
       const k = toISODateLocal(d.dt)
       const i = idx.get(k)
-      if (i !== undefined) out[i].ap += d.premiumNum
+      if (i !== undefined) out[i].v += d.annualNum
     })
 
     return out
-  }, [parsed, rangeStart, rangeEnd])
+  }, [parsed, parsedRange.start, parsedRange.end])
 
-  const trendMax = useMemo(() => Math.max(1, ...dailyAP.map((x) => x.ap)), [dailyAP])
+  const trendMax = useMemo(() => Math.max(1, ...dailyAnnual.map((x) => x.v)), [dailyAnnual])
 
-  // Carrier breakdown
+  // Carrier breakdown (admin/owner only) uses ANNUAL
   const byCarrier = useMemo(() => {
-    const m = new Map<string, { carrier: string; ap: number; deals: number }>()
+    const m = new Map<string, { carrier: string; annual: number; deals: number }>()
     parsed.forEach((d) => {
       const k = d.companySafe
-      if (!m.has(k)) m.set(k, { carrier: k, ap: 0, deals: 0 })
+      if (!m.has(k)) m.set(k, { carrier: k, annual: 0, deals: 0 })
       const r = m.get(k)!
-      r.ap += d.premiumNum
+      r.annual += d.annualNum
       r.deals += 1
     })
-    return Array.from(m.values()).sort((a, b) => b.ap - a.ap)
+    return Array.from(m.values()).sort((a, b) => b.annual - a.annual)
   }, [parsed])
-  
+
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
       <Sidebar />
@@ -379,7 +399,9 @@ export default function AnalyticsPage() {
         <div className="mb-8 flex items-end justify-between">
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">Analytics</h1>
-            <p className="text-sm text-white/60 mt-1">Custom range for everything • clean signal.</p>
+            <p className="text-sm text-white/60 mt-1">
+              Range applies to everything • Annual premium shown (premium × 12).
+            </p>
           </div>
 
           <div className="flex items-center gap-3">
@@ -394,47 +416,20 @@ export default function AnalyticsPage() {
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div>
               <div className="text-sm font-semibold">Date Range</div>
-              <div className="text-xs text-white/55 mt-1">Applies to all analytics on this page.</div>
+              <div className="text-xs text-white/55 mt-1">Default: Current week (Mon → Sun).</div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              {(['this_week', 'last_7', 'this_month', 'custom'] as const).map((k) => (
-                <button
-                  key={k}
-                  onClick={() => setRangeMode(k)}
-                  className={[
-                    'rounded-2xl border px-4 py-2 text-sm font-semibold transition',
-                    rangeMode === k ? 'bg-white/10 border-white/15' : 'bg-white/5 border-white/10 hover:bg-white/10',
-                  ].join(' ')}
-                >
-                  {k === 'this_week'
-                    ? 'This Week'
-                    : k === 'last_7'
-                    ? 'Last 7'
-                    : k === 'this_month'
-                    ? 'This Month'
-                    : 'Custom'}
-                </button>
-              ))}
-            </div>
+            <FlowRangePicker value={rangeValue} onChange={setRangeValue} defaultPreset="THIS_WEEK" />
           </div>
 
-          <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <div className="text-[11px] text-white/55 mb-2">Start</div>
-              <FlowDatePicker value={rangeStart} onChange={setRangeStart} placeholder="Start date" />
-            </div>
-            <div>
-              <div className="text-[11px] text-white/55 mb-2">End (exclusive)</div>
-              <FlowDatePicker value={rangeEnd} onChange={setRangeEnd} placeholder="End date" />
-              <div className="text-[11px] text-white/50 mt-2">Tip: end is exclusive (set to tomorrow for “through today”).</div>
-            </div>
+          <div className="mt-3 text-[11px] text-white/45">
+            Query uses end <span className="text-white/60">(exclusive)</span> under the hood to include the full last day.
           </div>
         </div>
 
         {/* TOP KPIs */}
         <section className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-          <MiniStat label="Total AP" value={loading ? '—' : `$${formatMoney2(totalAP)}`} />
+          <MiniStat label="Total Annual Premium" value={loading ? '—' : `$${formatMoney2(totalAnnual)}`} />
           <MiniStat label="Deals Submitted" value={loading ? '—' : String(dealsCount)} />
           <MiniStat label="Avg Premium / Deal" value={loading ? '—' : `$${formatMoney2(avgPremiumPerDeal)}`} />
           <MiniStat label="Top Carrier" value={loading ? '—' : topCarrier} />
@@ -453,58 +448,42 @@ export default function AnalyticsPage() {
           </div>
 
           <div className="glass rounded-2xl border border-white/10 p-6">
-            <div className="text-sm font-semibold">Average AP per agent</div>
-            <div className="text-xs text-white/55 mt-1">Average of each agent’s AP per deal (active agents).</div>
+            <div className="text-sm font-semibold">Average annual premium per agent</div>
+            <div className="text-xs text-white/55 mt-1">Average annual total per active agent in range.</div>
 
             <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
               <div className="text-xs text-white/50">Avg</div>
-              <div className="mt-1 text-3xl font-semibold">{loading ? '—' : `$${formatMoney2(avgAPPerAgent)}`}</div>
+              <div className="mt-1 text-3xl font-semibold">{loading ? '—' : `$${formatMoney2(avgAnnualPerAgent)}`}</div>
             </div>
           </div>
 
-                    <div className="glass rounded-2xl border border-white/10 p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm font-semibold">Agents under ${formatMoney2(WEEKLY_UNDER_AP)} AP</div>
-                <div className="text-xs text-white/55 mt-1">In the selected range.</div>
+          {/* Collapsible under 5k */}
+          <div className="glass rounded-2xl border border-white/10 p-6">
+            <button
+              type="button"
+              onClick={() => setUnderOpen((s) => !s)}
+              className="w-full flex items-center justify-between"
+            >
+              <div className="text-left">
+                <div className="text-sm font-semibold">Agents under ${formatMoney2(UNDER_5K_ANNUAL)} (Annual)</div>
+                <div className="text-xs text-white/55 mt-1">Collapsible for a cleaner look.</div>
               </div>
+              <span className="text-white/60 text-sm">{underOpen ? '▴' : '▾'}</span>
+            </button>
 
-              <button
-                type="button"
-                onClick={() => setUnderOpen((s) => !s)}
-                className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-3 py-2 text-xs font-semibold"
-              >
-                {underOpen ? 'Collapse' : 'Expand'}
-              </button>
-            </div>
-
-            {!underOpen ? (
-              <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
-                {loading ? '—' : `${under5kAgents.length} agent${under5kAgents.length === 1 ? '' : 's'} under threshold`}
-              </div>
-            ) : (
+            {underOpen && (
               <>
                 <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 overflow-hidden">
-                  <Row head left="Agent" mid="AP" right="Deals" />
-                  {(loading ? [] : under5kAgents.slice(0, 10)).map((a) => (
-                    <Row key={a.agent_id} left={a.name} mid={`$${formatMoney2(a.ap)}`} right={String(a.deals)} dangerMid />
+                  <Row head left="Agent" mid="Annual" right="Deals" />
+                  {(loading ? [] : under5kAgents.slice(0, 12)).map((a) => (
+                    <Row key={a.agent_id} left={a.name} mid={`$${formatMoney2(a.annual)}`} right={String(a.deals)} dangerMid />
                   ))}
                   {!loading && under5kAgents.length === 0 && <Row left="—" mid="None ✅" right="—" />}
                 </div>
 
-                <div className="mt-3 text-[11px] text-white/50">Shows bottom performers first.</div>
+                <div className="mt-3 text-[11px] text-white/50">Bottom performers first.</div>
               </>
             )}
-          </div>
-            <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 overflow-hidden">
-              <Row head left="Agent" mid="AP" right="Deals" />
-              {(loading ? [] : under5kAgents.slice(0, 10)).map((a) => (
-                <Row key={a.agent_id} left={a.name} mid={`$${formatMoney2(a.ap)}`} right={String(a.deals)} dangerMid />
-              ))}
-              {!loading && under5kAgents.length === 0 && <Row left="—" mid="None ✅" right="—" />}
-            </div>
-
-            <div className="mt-3 text-[11px] text-white/50">Shows bottom performers first.</div>
           </div>
         </section>
 
@@ -512,62 +491,72 @@ export default function AnalyticsPage() {
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 glass rounded-2xl border border-white/10 p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-semibold">Daily AP Trend</h2>
-              <span className="text-xs text-white/60">{rangeStart} → {rangeEnd}</span>
+              <h2 className="text-base font-semibold">Daily Annual Trend</h2>
+              <span className="text-xs text-white/60">
+                {parsedRange.start || '—'} → {parsedRange.end || '—'}
+              </span>
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4 overflow-hidden">
-              <MiniAreaChart data={dailyAP.map((x) => x.ap)} max={trendMax} />
+              <MiniAreaChart
+                data={dailyAnnual.map((x) => x.v)}
+                max={trendMax}
+                labels={dailyAnnual.map((x) => x.label)}
+              />
+
               <div className="mt-3 grid grid-cols-4 md:grid-cols-8 gap-2 text-[11px] text-white/45">
-                {dailyAP.slice(Math.max(0, dailyAP.length - 8)).map((x) => (
+                {dailyAnnual.slice(Math.max(0, dailyAnnual.length - 8)).map((x) => (
                   <div key={x.label} className="truncate">
-                    {x.label.slice(5)}: <span className="text-white/70">${formatMoney2(x.ap)}</span>
+                    {x.label.slice(5)}: <span className="text-white/70">${formatMoney2(x.v)}</span>
                   </div>
                 ))}
               </div>
             </div>
           </div>
 
-          <div className="glass rounded-2xl border border-white/10 p-6">
-            <div className="text-base font-semibold mb-4">By Carrier</div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 overflow-hidden">
-              <Row head left="Carrier" mid="AP" right="Deals" />
-              {(loading ? [] : byCarrier.slice(0, 10)).map((c) => (
-                <Row key={c.carrier} left={c.carrier} mid={`$${formatMoney2(c.ap)}`} right={String(c.deals)} />
-              ))}
-              {!loading && byCarrier.length === 0 && <Row left="—" mid="No data" right="—" />}
+          {/* ✅ Company analytics ONLY for admin/owner */}
+          {isAdminOrOwner ? (
+            <div className="glass rounded-2xl border border-white/10 p-6">
+              <div className="text-base font-semibold mb-4">By Carrier (Annual)</div>
+              <div className="rounded-2xl border border-white/10 bg-white/5 overflow-hidden">
+                <Row head left="Carrier" mid="Annual" right="Deals" />
+                {(loading ? [] : byCarrier.slice(0, 10)).map((c) => (
+                  <Row key={c.carrier} left={c.carrier} mid={`$${formatMoney2(c.annual)}`} right={String(c.deals)} />
+                ))}
+                {!loading && byCarrier.length === 0 && <Row left="—" mid="No data" right="—" />}
+              </div>
+              <div className="mt-3 text-[11px] text-white/50">Visible to admin/owner only.</div>
             </div>
-          </div>
+          ) : (
+            <div className="glass rounded-2xl border border-white/10 p-6">
+              <div className="text-base font-semibold mb-2">By Carrier</div>
+              <div className="text-sm text-white/60">Admin-only.</div>
+            </div>
+          )}
         </section>
 
-                  <div className="flex items-center justify-between mb-4">
-            <div>
+        {/* NON WRITERS (collapsible) */}
+        <section className="mt-6 glass rounded-2xl border border-white/10 p-6">
+          <button
+            type="button"
+            onClick={() => setNonWriterOpen((s) => !s)}
+            className="w-full flex items-center justify-between mb-2"
+          >
+            <div className="text-left">
               <h2 className="text-base font-semibold">Non Writers</h2>
               <div className="text-xs text-white/55 mt-1">Agents with 0 deals in the selected range.</div>
             </div>
-
             <div className="flex items-center gap-3">
               <div className="text-xs text-white/60">
                 Total: <span className="text-white font-semibold">{loading ? '—' : nonWriters.length}</span>
               </div>
-
-              <button
-                type="button"
-                onClick={() => setNonWritersOpen((s) => !s)}
-                className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-3 py-2 text-xs font-semibold"
-              >
-                {nonWritersOpen ? 'Collapse' : 'Expand'}
-              </button>
+              <span className="text-white/60 text-sm">{nonWriterOpen ? '▴' : '▾'}</span>
             </div>
-          </div>
+          </button>
 
-          {!nonWritersOpen ? (
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
-              {loading ? '—' : `Showing collapsed • ${nonWriters.length} non-writer${nonWriters.length === 1 ? '' : 's'}`}
-            </div>
-          ) : (
+          {nonWriterOpen && (
             <>
-              <div className="rounded-2xl border border-white/10 bg-white/5 overflow-hidden">
+              <div className="rounded-2xl border border-white/10 bg-white/5 overflow-hidden mt-4">
                 <Row head left="Agent" mid="Email" right="Status" />
                 {(loading ? [] : nonWriters.slice(0, 40)).map((n) => (
                   <Row key={n.id} left={n.name} mid={n.email || '—'} right="0 deals" dangerRight />
@@ -575,10 +564,15 @@ export default function AnalyticsPage() {
                 {!loading && nonWriters.length === 0 && <Row left="—" mid="Everyone wrote ✅" right="—" />}
               </div>
 
-              <div className="mt-3 text-[11px] text-white/50">If you want a full export button here, say “1”.</div>
+              <div className="mt-3 text-[11px] text-white/50">Collapsed by default for a cleaner look.</div>
             </>
           )}
-      
+        </section>
+      </div>
+    </div>
+  )
+}
+
 /* ---------- UI bits ---------- */
 
 function MiniStat({ label, value }: { label: string; value: string }) {
@@ -619,8 +613,13 @@ function Row({
   )
 }
 
-// simple, no-deps chart (avoids Chart.js)
-function MiniAreaChart({ data, max }: { data: number[]; max: number }) {
+/**
+ * Mini chart with:
+ * - horizontal + vertical grid
+ * - points
+ * - hover tracking + tooltip
+ */
+function MiniAreaChart({ data, max, labels }: { data: number[]; max: number; labels: string[] }) {
   const w = 820
   const h = 180
   const pad = 12
@@ -628,13 +627,10 @@ function MiniAreaChart({ data, max }: { data: number[]; max: number }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null)
 
   const ptsArr = useMemo(() => {
-    const arr = data || []
-    const safeMax = Math.max(1, Number(max || 1))
-    return arr.map((v, i) => {
-      const x = pad + (i * (w - pad * 2)) / Math.max(1, arr.length - 1)
-      const val = Number(v || 0)
-      const y = h - pad - (Math.min(safeMax, Math.max(0, val)) * (h - pad * 2)) / safeMax
-      return { x, y, v: val }
+    return (data || []).map((v, i) => {
+      const x = pad + (i * (w - pad * 2)) / Math.max(1, data.length - 1)
+      const y = h - pad - (Math.min(max, Math.max(0, v)) * (h - pad * 2)) / max
+      return { x, y, v: Number(v || 0) }
     })
   }, [data, max])
 
@@ -642,7 +638,7 @@ function MiniAreaChart({ data, max }: { data: number[]; max: number }) {
 
   function onMove(e: React.MouseEvent<SVGSVGElement, MouseEvent>) {
     if (!ptsArr.length) return
-    const rect = e.currentTarget.getBoundingClientRect()
+    const rect = (e.currentTarget as any).getBoundingClientRect()
     const mx = ((e.clientX - rect.left) / rect.width) * w
 
     let best = 0
@@ -686,7 +682,7 @@ function MiniAreaChart({ data, max }: { data: number[]; max: number }) {
         />
       ))}
 
-      {ptsArr.length > 1 &&
+      {data.length > 1 &&
         [0.2, 0.4, 0.6, 0.8].map((p) => (
           <line
             key={`v_${p}`}
@@ -747,12 +743,14 @@ function MiniAreaChart({ data, max }: { data: number[]; max: number }) {
           <circle cx={hover.x} cy={hover.y} r={6} fill="rgba(255,255,255,0.12)" />
           <circle cx={hover.x} cy={hover.y} r={3.2} fill="rgba(255,255,255,0.95)" />
 
+          {/* tooltip */}
           <g>
             {(() => {
-              const bw = 132
-              const bh = 44
+              const bw = 172
+              const bh = 52
               const x = Math.max(pad, Math.min(w - pad - bw, hover.x - bw / 2))
-              const y = Math.max(pad, hover.y - 62)
+              const y = Math.max(pad, hover.y - 70)
+              const dayLabel = labels?.[hoverIdx!] ? labels[hoverIdx!].slice(5) : `Day #${hoverIdx! + 1}`
 
               return (
                 <>
@@ -765,10 +763,10 @@ function MiniAreaChart({ data, max }: { data: number[]; max: number }) {
                     fill="rgba(11,15,26,0.92)"
                     stroke="rgba(255,255,255,0.10)"
                   />
-                  <text x={x + 12} y={y + 18} fill="rgba(255,255,255,0.75)" fontSize="11">
-                    Day #{(hoverIdx ?? 0) + 1}
+                  <text x={x + 12} y={y + 20} fill="rgba(255,255,255,0.75)" fontSize="11">
+                    {dayLabel}
                   </text>
-                  <text x={x + 12} y={y + 35} fill="rgba(255,255,255,0.95)" fontSize="14" fontWeight="700">
+                  <text x={x + 12} y={y + 40} fill="rgba(255,255,255,0.95)" fontSize="14" fontWeight="700">
                     ${Number(hover.v || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
                   </text>
                 </>
@@ -780,6 +778,7 @@ function MiniAreaChart({ data, max }: { data: number[]; max: number }) {
     </svg>
   )
 }
+
 /* ---------- helpers ---------- */
 
 function displayName(p: Profile) {
@@ -793,23 +792,18 @@ function formatMoney2(n: number) {
   return num.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })
 }
 
-function toISODate(d: Date) {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
-
 function toISODateLocal(d: Date) {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
+  const dt = new Date(d)
+  const y = dt.getFullYear()
+  const m = String(dt.getMonth() + 1).padStart(2, '0')
+  const day = String(dt.getDate()).padStart(2, '0')
   return `${y}-${m}-${day}`
 }
 
 function diffDays(a: Date, b: Date) {
-  const ms = b.getTime() - a.getTime()
-  return Math.ceil(ms / 86400000)
+  const a0 = new Date(a.getFullYear(), a.getMonth(), a.getDate()).getTime()
+  const b0 = new Date(b.getFullYear(), b.getMonth(), b.getDate()).getTime()
+  return Math.round((b0 - a0) / 86400000)
 }
 
 function clampDays(v: number, lo: number, hi: number) {
@@ -826,32 +820,6 @@ function humanGap(ms: number) {
   return `${days}d`
 }
 
-function buildTeamIdsFromDirectory(rootId: string, directory: any[]) {
-  const children = new Map<string, string[]>()
-
-  directory.forEach((p: any) => {
-    const up = p.upline_id || null
-    if (!up) return
-    const upId = String(up)
-    const id = String(p.id)
-    if (!children.has(upId)) children.set(upId, [])
-    children.get(upId)!.push(id)
-  })
-
-  const out: string[] = []
-  const q: string[] = [String(rootId)]
-  const seen = new Set<string>()
-
-  while (q.length) {
-    const cur = q.shift()!
-    if (seen.has(cur)) continue
-    seen.add(cur)
-    out.push(cur)
-    ;(children.get(cur) || []).forEach((k) => q.push(k))
-    if (out.length > 2500) break
-  }
-  return out
-}
 const btnGlass =
   'glass px-4 py-2 text-sm font-medium hover:bg-white/10 transition rounded-2xl border border-white/10'
 const btnSoft = 'rounded-xl bg-white/10 hover:bg-white/15 transition px-3 py-2 text-xs'
