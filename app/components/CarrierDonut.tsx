@@ -153,5 +153,3 @@ export default function CarrierDonut({
         <div className={`text-xs font-semibold mt-1 ${pop ? 'center-pop' : ''}`} style={{ color: 'rgba(255,255,255,0.9)' }}>
           {top.pct}%
         </div>
-
-        {/** removed rank badges */}
