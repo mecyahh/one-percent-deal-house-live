@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import Sidebar from '../components/Sidebar'
 import FlowLineChart from '../components/FlowLineChart'
+import FlowRangePicker from '../components/FlowRangePicker'
 import FlowDatePicker from '../components/FlowDatePicker'
 import CarrierDonut from '../components/CarrierDonut'
 import { supabase } from '@/lib/supabaseClient'
@@ -68,10 +69,9 @@ export default function DashboardPage() {
   // ✅ Light/Dark toggle (UI-only; doesn’t change existing theme tokens)
   const [darkMode, setDarkMode] = useState<boolean>(true)
 
-  // ✅ Date selector (thin, sleek) for chart + KPI scope
-  const [dateOpen, setDateOpen] = useState(false)
-  const [rangeStart, setRangeStart] = useState<string>('') // YYYY-MM-DD
-  const [rangeEnd, setRangeEnd] = useState<string>('') // YYYY-MM-DD
+  // ✅ Range selector (FlowRangePicker) for chart + KPI scope
+// value format: "YYYY-MM-DD|YYYY-MM-DD"
+const [range, setRange] = useState<string>('') // FlowRangePicker will seed THIS_WEEK by default
 
   // ✅ Downlines/team scope
   const [teamIds, setTeamIds] = useState<string[] | null>(null)
@@ -111,13 +111,9 @@ export default function DashboardPage() {
       if (!alive) return
       await loadGoals(user.id)
 
-      // Set default date range = this month (matches current behavior)
-      const now = new Date()
-      const ms = new Date(now.getFullYear(), now.getMonth(), 1)
-      const meIso = toYMD(now)
-      const msIso = toYMD(ms)
-      setRangeStart(msIso)
-      setRangeEnd(meIso)
+      // ✅ Default range is ALWAYS current week for everyone.
+// FlowRangePicker will seed THIS_WEEK when `range` is empty.
+setRange('')
 
       const isOwnerOrAdmin = !!(profile && (profile.role === 'admin' || profile.is_agency_owner))
 
@@ -362,13 +358,26 @@ export default function DashboardPage() {
   const weekStart = startOfWeek(now)
   const monthStart = startOfMonth(now)
 
-  // ✅ Date-range filtering (default: month-to-date so behavior matches current)
-  const rangeStartDt = useMemo(() => (rangeStart ? new Date(rangeStart + 'T00:00:00') : monthStart), [rangeStart, monthStart])
-  const rangeEndDt = useMemo(() => {
-    if (!rangeEnd) return now
-    const e = new Date(rangeEnd + 'T23:59:59')
-    return e
-  }, [rangeEnd, now])
+ const { rangeStartISO, rangeEndISO } = useMemo(() => {
+  const [a, b] = (range || '').split('|')
+  return {
+    rangeStartISO: a || '',
+    rangeEndISO: b || a || '',
+  }
+}, [range])
+
+const rangeStartDt = useMemo(() => {
+  // FlowRangePicker seeds, but keep a safe fallback:
+  if (rangeStartISO) return new Date(rangeStartISO + 'T00:00:00')
+  return weekStart
+}, [rangeStartISO, weekStart])
+
+const rangeEndDt = useMemo(() => {
+  if (rangeEndISO) return new Date(rangeEndISO + 'T23:59:59')
+  return now
+}, [rangeEndISO, now])
+
+const rangeDeals = useMemo(() => parsed.filter((d) => d.dt >= rangeStartDt && d.dt <= rangeEndDt), [parsed, rangeStartDt, rangeEndDt])
 
   const rangeDeals = useMemo(
     () => parsed.filter((d) => d.dt >= rangeStartDt && d.dt <= rangeEndDt),
@@ -682,72 +691,14 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between mt-6 mb-3">
                 <div className="text-sm font-semibold text-white/80">Production</div>
 
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setDateOpen((v) => !v)}
-                    className="rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-3 py-2 text-xs font-semibold inline-flex items-center gap-2"
-                    title="Select date range"
-                  >
-                    <CalendarIcon />
-                    <span className="text-white/70">
-                      {rangeStart || toYMD(monthStart)} → {rangeEnd || toYMD(now)}
-                    </span>
-                  </button>
-
-                  {dateOpen && (
-                    <div className="absolute right-0 mt-2 z-[260] w-[340px] rounded-2xl border border-white/10 bg-[var(--card)]/95 backdrop-blur-xl shadow-2xl p-4">
-                      <div className="text-sm font-semibold mb-3">Date Range</div>
-
-                      <div className="grid grid-cols-1 gap-3">
-                        <div>
-                          <div className="text-[11px] text-white/55 mb-2">Start</div>
-                          <input
-                            type="date"
-                            className={inputCls}
-                            value={rangeStart}
-                            onChange={(e) => setRangeStart(e.target.value)}
-                          />
-                        </div>
-
-                        <div>
-                          <div className="text-[11px] text-white/55 mb-2">End</div>
-                          <input
-                            type="date"
-                            className={inputCls}
-                            value={rangeEnd}
-                            onChange={(e) => setRangeEnd(e.target.value)}
-                          />
-                        </div>
-
-                        <div className="flex items-center justify-between gap-2 mt-1">
-                          <button
-                            className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-3 py-2 text-xs font-semibold"
-                            onClick={() => {
-                              const n = new Date()
-                              setRangeStart(toYMD(new Date(n.getFullYear(), n.getMonth(), 1)))
-                              setRangeEnd(toYMD(n))
-                              setDateOpen(false)
-                            }}
-                          >
-                            Month-to-date
-                          </button>
-
-                          <button
-                            className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-3 py-2 text-xs font-semibold"
-                            onClick={() => setDateOpen(false)}
-                          >
-                            Done
-                          </button>
-                        </div>
-
-                        <div className="text-[11px] text-white/45">
-                          This selector drives the Flow Trend + donut distribution (rangeDeals).
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                <div className="flex items-center gap-2">
+  <FlowRangePicker
+    value={range}
+    onChange={setRange}
+    defaultPreset="THIS_WEEK" // ✅ ALWAYS current week default
+    placeholder="Select range"
+  />
+</div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
