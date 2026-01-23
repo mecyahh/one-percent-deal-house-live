@@ -1,4 +1,3 @@
-// ✅ REPLACE ENTIRE FILE: /app/components/FlowDatePicker.tsx
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -16,8 +15,11 @@ type PresetKey =
   | 'PAST_180'
   | 'PAST_12_MONTHS'
   | 'YTD'
+  | 'CUSTOM'
 
-const PRESETS: { key: PresetKey; label: string }[] = [
+type Preset = { key: PresetKey; label: string }
+
+const PRESETS: Preset[] = [
   { key: 'THIS_WEEK', label: 'This Week' },
   { key: 'LAST_WEEK', label: 'Last Week' },
   { key: 'PAST_7', label: 'Past 7 Days' },
@@ -31,120 +33,570 @@ const PRESETS: { key: PresetKey; label: string }[] = [
   { key: 'YTD', label: 'YTD' },
 ]
 
+function parseRange(value: string): { start: string; end: string } {
+  if (!value) return { start: '', end: '' }
+  const [a, b] = value.split('|')
+  if (!a) return { start: '', end: '' }
+  return { start: a, end: b || a }
+}
+
+function normalizeRange(start: string, end: string) {
+  if (!start) return { start: '', end: '' }
+  if (!end) return { start, end: start }
+  const sT = parseISO(start).getTime()
+  const eT = parseISO(end).getTime()
+  if (sT <= eT) return { start, end }
+  return { start: end, end: start }
+}
+
 export default function FlowDatePicker({
   value,
   onChange,
+  placeholder = 'Select range',
+  minYear = 1900,
+  maxYear,
 }: {
+  /** Range string: "YYYY-MM-DD|YYYY-MM-DD" */
   value: string
   onChange: (v: string) => void
+  placeholder?: string
+  minYear?: number
+  maxYear?: number
 }) {
   const anchorRef = useRef<HTMLDivElement | null>(null)
   const popRef = useRef<HTMLDivElement | null>(null)
 
+  const computedMaxYear = maxYear ?? new Date().getFullYear() + 5
+
   const [open, setOpen] = useState(false)
   const [presetOpen, setPresetOpen] = useState(false)
-  const [preset, setPreset] = useState('This Week')
+  const [activeField, setActiveField] = useState<'start' | 'end'>('start')
 
-  const [pos, setPos] = useState({ top: 0, left: 0 })
+  // popover position
+  const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
 
-  const [start, end] = value ? value.split('|') : ['', '']
+  const parsed = useMemo(() => parseRange(value), [value])
+  const [startISO, setStartISO] = useState(parsed.start)
+  const [endISO, setEndISO] = useState(parsed.end)
 
+  // sync from outside changes
+  useEffect(() => {
+    setStartISO(parsed.start)
+    setEndISO(parsed.end)
+  }, [parsed.start, parsed.end])
+
+  // years
+  const years = useMemo(() => {
+    const out: number[] = []
+    for (let y = computedMaxYear; y >= minYear; y--) out.push(y)
+    return out
+  }, [computedMaxYear, minYear])
+
+  // calendar view follows active field
+  const activeISO = activeField === 'start' ? startISO : endISO
+  const initial = useMemo(() => (activeISO ? parseISO(activeISO) : new Date()), [activeISO])
+  const [viewYear, setViewYear] = useState(initial.getFullYear())
+  const [viewMonth, setViewMonth] = useState(initial.getMonth())
+
+  // when open, sync view to active field
   useEffect(() => {
     if (!open) return
-    const r = anchorRef.current!.getBoundingClientRect()
-    setPos({ top: r.bottom + 6, left: r.left })
+    const d = activeISO ? parseISO(activeISO) : new Date()
+    setViewYear(d.getFullYear())
+    setViewMonth(d.getMonth())
+  }, [open, activeISO])
+
+  // position popover
+  useEffect(() => {
+    if (!open) return
+
+    function place() {
+      const a = anchorRef.current
+      if (!a) return
+      const r = a.getBoundingClientRect()
+
+      const width = 320
+      const height = 360
+      const gap = 8
+
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+
+      let top = r.bottom + gap
+      if (top + height > vh && r.top - gap - height > 0) top = r.top - gap - height
+
+      let left = r.left
+      if (left + width > vw - 8) left = vw - width - 8
+      if (left < 8) left = 8
+
+      setPos({ top, left })
+    }
+
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
   }, [open])
 
+  // outside click close
   useEffect(() => {
-    function close(e: MouseEvent) {
-      if (
-        !anchorRef.current?.contains(e.target as Node) &&
-        !popRef.current?.contains(e.target as Node)
-      ) {
-        setOpen(false)
-        setPresetOpen(false)
-      }
+    function onDocDown(e: MouseEvent) {
+      const t = e.target as Node
+      if (anchorRef.current?.contains(t)) return
+      if (popRef.current?.contains(t)) return
+      setOpen(false)
+      setPresetOpen(false)
     }
-    document.addEventListener('mousedown', close)
-    return () => document.removeEventListener('mousedown', close)
+    document.addEventListener('mousedown', onDocDown)
+    return () => document.removeEventListener('mousedown', onDocDown)
   }, [])
 
-  function applyPreset(label: string) {
-    const now = new Date()
-    const start = new Date(now)
-    const end = new Date(now)
+  const monthLabel = new Date(viewYear, viewMonth, 1).toLocaleDateString(undefined, {
+    month: 'long',
+    year: 'numeric',
+  })
+  const grid = buildMonthGrid(viewYear, viewMonth)
+  const todayISO = toISO(new Date())
 
-    if (label === 'This Week') start.setDate(now.getDate() - now.getDay() + 1)
-    if (label === 'Past 7 Days') start.setDate(now.getDate() - 6)
-    if (label === 'Past 30 Days') start.setDate(now.getDate() - 29)
+  const normalized = normalizeRange(startISO, endISO)
+  const displayText =
+    normalized.start && normalized.end
+      ? `${pretty(normalized.start)}  -  ${pretty(normalized.end)}`
+      : placeholder
 
-    onChange(`${toISO(start)}|${toISO(end)}`)
-    setPreset(label)
-    setPresetOpen(false)
+  const detectedPreset = useMemo(() => detectPreset(normalized.start, normalized.end), [
+    normalized.start,
+    normalized.end,
+  ])
+
+  function commit(nextStart: string, nextEnd: string, close = false) {
+    const n = normalizeRange(nextStart, nextEnd)
+    setStartISO(n.start)
+    setEndISO(n.end)
+    onChange(n.start ? `${n.start}|${n.end}` : '')
+    if (close) setOpen(false)
   }
 
-  return (
-    <div ref={anchorRef} className="inline-flex items-center gap-1">
-      {/* Preset */}
-      <button
-        onClick={() => setPresetOpen((s) => !s)}
-        className="text-[13px] px-2 py-[6px] rounded-md border border-white/10 bg-white/5 hover:bg-white/10 transition"
-      >
-        {preset} ▾
-      </button>
+  function applyPreset(p: PresetKey) {
+    const r = getPresetRange(p)
+    commit(r.start, r.end, true)
+    setPresetOpen(false)
+    setActiveField('start')
+  }
 
-      {/* Date Range */}
-      <button
-        onClick={() => setOpen(true)}
-        className="text-[13px] px-2 py-[6px] rounded-md border border-white/10 bg-white/5 hover:bg-white/10 transition"
-      >
-        {start && end
-          ? `${pretty(start)}  –  ${pretty(end)}`
-          : 'Select range'}
-      </button>
+  function onPickDay(iso: string) {
+    if (activeField === 'start') {
+      // pick start, keep open, move to end
+      const nextStart = iso
+      const nextEnd = endISO || iso
+      commit(nextStart, nextEnd, false)
+      setActiveField('end')
+      return
+    }
+    // pick end, close
+    commit(startISO || iso, iso, true)
+    setActiveField('start')
+  }
 
-      {/* Preset dropdown */}
-      {presetOpen && (
-        <div className="absolute mt-8 w-48 rounded-md bg-[#0b0f1a] border border-white/10 shadow-xl z-[2147483647]">
-          {PRESETS.map((p) => (
-            <button
-              key={p.key}
-              onClick={() => applyPreset(p.label)}
-              className="block w-full text-left px-3 py-2 text-[13px] hover:bg-white/10"
-            >
-              {p.label}
-            </button>
+  const popover = open ? (
+    <div
+      ref={popRef}
+      className="fixed z-[2147483647] w-[320px] rounded-2xl border border-white/10 bg-[#0b0f1a]/95 backdrop-blur-xl shadow-2xl overflow-hidden"
+      style={{ top: pos.top, left: pos.left }}
+    >
+      {/* top: start/end toggle pills (thin) */}
+      <div className="px-3 py-2 flex items-center justify-between border-b border-white/10">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveField('start')}
+            className={[
+              'px-2 py-1 rounded-lg text-xs border transition',
+              activeField === 'start'
+                ? 'bg-white/10 border-white/15 text-white'
+                : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10',
+            ].join(' ')}
+          >
+            Start
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveField('end')}
+            className={[
+              'px-2 py-1 rounded-lg text-xs border transition',
+              activeField === 'end'
+                ? 'bg-white/10 border-white/15 text-white'
+                : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10',
+            ].join(' ')}
+          >
+            End
+          </button>
+        </div>
+
+        <div className="text-[11px] text-white/55">
+          {normalized.start ? pretty(normalized.start) : '—'}{' '}
+          <span className="text-white/35">→</span>{' '}
+          {normalized.end ? pretty(normalized.end) : '—'}
+        </div>
+      </div>
+
+      {/* calendar header */}
+      <div className="px-4 py-3 flex items-center justify-between border-b border-white/10">
+        <button
+          type="button"
+          onClick={() => {
+            const d = new Date(viewYear, viewMonth, 1)
+            d.setMonth(d.getMonth() - 1)
+            setViewYear(d.getFullYear())
+            setViewMonth(d.getMonth())
+          }}
+          className="h-9 w-9 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition"
+          aria-label="Previous month"
+        >
+          ‹
+        </button>
+
+        <div className="flex items-center gap-2">
+          <div className="text-sm font-semibold">{monthLabel}</div>
+          <select
+            className="rounded-xl border border-white/10 bg-white/5 px-2 py-1 text-xs outline-none hover:bg-white/10 transition"
+            value={viewYear}
+            onChange={(e) => setViewYear(Number(e.target.value))}
+            aria-label="Select year"
+          >
+            {years.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            const d = new Date(viewYear, viewMonth, 1)
+            d.setMonth(d.getMonth() + 1)
+            setViewYear(d.getFullYear())
+            setViewMonth(d.getMonth())
+          }}
+          className="h-9 w-9 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition"
+          aria-label="Next month"
+        >
+          ›
+        </button>
+      </div>
+
+      <div className="px-4 py-3">
+        <div className="grid grid-cols-7 gap-1 text-[11px] text-white/50 mb-2">
+          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
+            <div key={d} className="text-center">
+              {d}
+            </div>
           ))}
         </div>
-      )}
 
-      {/* Calendar */}
-      {open &&
-        createPortal(
-          <div
-            ref={popRef}
-            style={{ top: pos.top, left: pos.left }}
-            className="fixed w-[300px] rounded-lg border border-white/10 bg-[#0b0f1a] shadow-2xl z-[2147483647]"
+        <div className="grid grid-cols-7 gap-1">
+          {grid.flat().map((cell, i) => {
+            const iso = toISO(cell.date)
+            const isThisMonth = cell.inMonth
+            const isToday = iso === todayISO
+
+            const inRange =
+              normalized.start && normalized.end
+                ? isBetweenInclusive(iso, normalized.start, normalized.end)
+                : false
+
+            const isStart = normalized.start && iso === normalized.start
+            const isEnd = normalized.end && iso === normalized.end
+
+            const base = 'h-10 rounded-xl text-sm transition border'
+            const dim = !isThisMonth ? 'text-white/30' : 'text-white'
+
+            const bg =
+              isStart || isEnd
+                ? 'bg-blue-600 border-blue-500/60 text-white'
+                : inRange
+                  ? 'bg-white/10 border-white/10 hover:bg-white/12'
+                  : 'bg-white/5 border-white/10 hover:bg-white/10'
+
+            const ring = isToday && !(isStart || isEnd) ? 'ring-1 ring-white/15' : ''
+
+            return (
+              <button
+                key={i}
+                type="button"
+                onClick={() => onPickDay(iso)}
+                className={[base, bg, dim, ring].join(' ')}
+              >
+                {cell.date.getDate()}
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              const t = toISO(new Date())
+              commit(t, t, true)
+              setActiveField('start')
+            }}
+            className="flex-1 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-3 py-2 text-xs"
           >
-            {/* reuse your existing calendar grid here if needed */}
-            <div className="p-4 text-sm text-white/60">
-              Calendar UI stays same (already implemented)
+            Today
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setStartISO('')
+              setEndISO('')
+              onChange('')
+              setOpen(false)
+              setActiveField('start')
+            }}
+            className="flex-1 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition px-3 py-2 text-xs"
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null
+
+  // ✅ The thin EXACT bar: preset ▾ + date range (single control)
+  return (
+    <div ref={anchorRef} className="relative inline-flex items-center">
+      <div className="inline-flex items-center rounded-md border border-white/10 bg-white/5 overflow-hidden">
+        {/* Preset (left) */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setPresetOpen((s) => !s)}
+            className="h-full px-2 py-[6px] text-[13px] text-white/90 hover:bg-white/10 transition flex items-center gap-1"
+            aria-haspopup="menu"
+            aria-expanded={presetOpen}
+          >
+            <span>{detectedPreset}</span>
+            <span className="text-white/50">▾</span>
+          </button>
+
+          {presetOpen ? (
+            <div className="absolute left-0 mt-2 w-56 rounded-xl border border-white/10 bg-[#0b0f1a]/95 backdrop-blur-xl shadow-2xl overflow-hidden z-[2147483647]">
+              <div className="p-1">
+                {PRESETS.map((p) => (
+                  <button
+                    key={p.key}
+                    type="button"
+                    onClick={() => applyPreset(p.key)}
+                    className="w-full text-left rounded-lg px-3 py-2 text-[13px] text-white/90 hover:bg-white/10 transition"
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>,
-          document.body
-        )}
+          ) : null}
+        </div>
+
+        {/* Divider */}
+        <div className="w-px self-stretch bg-white/10" />
+
+        {/* Range (right) */}
+        <button
+          type="button"
+          onClick={() => {
+            setOpen((s) => !s)
+            setActiveField('start')
+          }}
+          className="px-2 py-[6px] text-[13px] text-white/90 hover:bg-white/10 transition flex items-center gap-2"
+        >
+          <span className={normalized.start ? 'text-white/90' : 'text-white/55'}>{displayText}</span>
+          <span className="text-white/70">
+            <CalendarGlassIcon />
+          </span>
+        </button>
+      </div>
+
+      {/* ✅ Portal popover */}
+      {typeof document !== 'undefined' && popover ? createPortal(popover, document.body) : null}
     </div>
   )
 }
 
-/* utils */
-function toISO(d: Date) {
-  return d.toISOString().slice(0, 10)
+/* ---------- Icon ---------- */
+function CalendarGlassIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M7 3v3M17 3v3"
+        stroke="rgba(255,255,255,0.80)"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M4 8h16"
+        stroke="rgba(255,255,255,0.80)"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M6 6h12a2 2 0 012 2v12a2 2 0 01-2 2H6a2 2 0 01-2-2V8a2 2 0 012-2Z"
+        stroke="rgba(255,255,255,0.80)"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8 12h.01M12 12h.01M16 12h.01M8 16h.01M12 16h.01"
+        stroke="rgba(255,255,255,0.55)"
+        strokeWidth="2.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
 }
+
+/* ---------- Calendar helpers ---------- */
+function buildMonthGrid(year: number, month: number) {
+  const first = new Date(year, month, 1)
+  const startDowMon0 = (first.getDay() + 6) % 7
+  const start = new Date(year, month, 1 - startDowMon0)
+
+  const grid: { date: Date; inMonth: boolean }[][] = []
+  let cur = new Date(start)
+  for (let r = 0; r < 6; r++) {
+    const row: { date: Date; inMonth: boolean }[] = []
+    for (let c = 0; c < 7; c++) {
+      row.push({ date: new Date(cur), inMonth: cur.getMonth() === month })
+      cur.setDate(cur.getDate() + 1)
+    }
+    grid.push(row)
+  }
+  return grid
+}
+
+function parseISO(iso: string) {
+  const [y, m, d] = iso.split('-').map((x) => Number(x))
+  return new Date(y, (m || 1) - 1, d || 1)
+}
+
+function toISO(d: Date) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 function pretty(iso: string) {
-  return new Date(iso).toLocaleDateString(undefined, {
-    month: 'short',
-    day: '2-digit',
-    year: 'numeric',
-  })
+  const d = parseISO(iso)
+  return d.toLocaleDateString(undefined, { month: 'short', day: '2-digit', year: 'numeric' })
+}
+
+function isBetweenInclusive(iso: string, a: string, b: string) {
+  const t = parseISO(iso).getTime()
+  const ta = parseISO(a).getTime()
+  const tb = parseISO(b).getTime()
+  const lo = Math.min(ta, tb)
+  const hi = Math.max(ta, tb)
+  return t >= lo && t <= hi
+}
+
+/* ---------- Presets ---------- */
+function startOfWeekMon(d: Date) {
+  const day = (d.getDay() + 6) % 7 // Mon=0
+  const out = new Date(d)
+  out.setHours(0, 0, 0, 0)
+  out.setDate(out.getDate() - day)
+  return out
+}
+function endOfWeekSun(d: Date) {
+  const s = startOfWeekMon(d)
+  const out = new Date(s)
+  out.setDate(out.getDate() + 6)
+  return out
+}
+function startOfMonth(d: Date) {
+  const out = new Date(d.getFullYear(), d.getMonth(), 1)
+  out.setHours(0, 0, 0, 0)
+  return out
+}
+function endOfMonth(d: Date) {
+  const out = new Date(d.getFullYear(), d.getMonth() + 1, 0)
+  out.setHours(0, 0, 0, 0)
+  return out
+}
+function startOfYear(d: Date) {
+  const out = new Date(d.getFullYear(), 0, 1)
+  out.setHours(0, 0, 0, 0)
+  return out
+}
+function addDays(d: Date, n: number) {
+  const out = new Date(d)
+  out.setDate(out.getDate() + n)
+  return out
+}
+function addMonths(d: Date, n: number) {
+  const out = new Date(d)
+  out.setMonth(out.getMonth() + n)
+  return out
+}
+
+function getPresetRange(key: PresetKey): { start: string; end: string } {
+  const now = new Date()
+  now.setHours(0, 0, 0, 0)
+
+  switch (key) {
+    case 'THIS_WEEK': {
+      const s = startOfWeekMon(now)
+      const e = endOfWeekSun(now)
+      return { start: toISO(s), end: toISO(e) }
+    }
+    case 'LAST_WEEK': {
+      const last = addDays(now, -7)
+      return { start: toISO(startOfWeekMon(last)), end: toISO(endOfWeekSun(last)) }
+    }
+    case 'PAST_7': {
+      return { start: toISO(addDays(now, -6)), end: toISO(now) }
+    }
+    case 'PAST_14': {
+      return { start: toISO(addDays(now, -13)), end: toISO(now) }
+    }
+    case 'THIS_MONTH': {
+      return { start: toISO(startOfMonth(now)), end: toISO(endOfMonth(now)) }
+    }
+    case 'LAST_MONTH': {
+      const prev = addMonths(now, -1)
+      return { start: toISO(startOfMonth(prev)), end: toISO(endOfMonth(prev)) }
+    }
+    case 'PAST_30': {
+      return { start: toISO(addDays(now, -29)), end: toISO(now) }
+    }
+    case 'PAST_90': {
+      return { start: toISO(addDays(now, -89)), end: toISO(now) }
+    }
+    case 'PAST_180': {
+      return { start: toISO(addDays(now, -179)), end: toISO(now) }
+    }
+    case 'PAST_12_MONTHS': {
+      return { start: toISO(addMonths(now, -12)), end: toISO(now) }
+    }
+    case 'YTD': {
+      return { start: toISO(startOfYear(now)), end: toISO(now) }
+    }
+    default:
+      return { start: toISO(now), end: toISO(now) }
+  }
+}
+
+function detectPreset(start: string, end: string): string {
+  if (!start || !end) return 'Custom'
+  for (const p of PRESETS) {
+    const r = getPresetRange(p.key)
+    if (r.start === start && r.end === end) return p.label
+  }
+  return 'Custom'
 }
