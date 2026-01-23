@@ -741,7 +741,7 @@ const lineValues = useMemo(() => last7.map((x) => x.ap), [last7])
 
               {/* ✅ donut gets same glow / glass effect as goals donuts (CarrierDonut patch below supports glow) */}
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4 mb-5">
-                <CarrierDonut   labels={carrierDist.labels}   values={carrierDist.values}   glow   colors={['#4CBB17', '#FF00FF', '#EF4444', '#F97316', '#3B82F6', '#14B8A6']} />
+<CarrierDonut labels={carrierDist.labels} values={carrierDist.values} glow />              
               </div>
 
               <div className="space-y-3">
