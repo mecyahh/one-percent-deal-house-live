@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Sidebar from '../components/Sidebar'
 import { supabase } from '@/lib/supabaseClient'
-import FlowDatePicker from '../components/FlowDatePicker'
+import FlowRangePicker from '../components/FlowRangePicker'
 
 type Row = {
   uid: string
@@ -18,8 +18,8 @@ export default function LeaderboardPage() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
-  // ✅ Week selector uses FlowDatePicker (anchor date; week snaps Mon→Sun)
-  const [weekAnchor, setWeekAnchor] = useState<string>('') // YYYY-MM-DD
+ // ✅ Range selector uses FlowRangePicker (YYYY-MM-DD|YYYY-MM-DD)
+const [range, setRange] = useState<string>('') // "YYYY-MM-DD|YYYY-MM-DD"
 
   // Data from RPC
   const [rows, setRows] = useState<Row[]>([])
@@ -40,10 +40,9 @@ export default function LeaderboardPage() {
           return
         }
 
-        // default = today
-        const today = toISODateLocal(new Date())
-        if (!alive) return
-        setWeekAnchor(today)
+        // default = THIS WEEK (Mon → Sun)
+if (!alive) return
+setRange(getThisWeekRangeString())
 
         setLoading(false)
       } catch (e: any) {
@@ -58,16 +57,23 @@ export default function LeaderboardPage() {
     }
   }, [])
 
-  // ✅ Week range snaps to Monday start; always 7 days (Mon→Sun)
-  const weekRange = useMemo(() => {
-    const anchor = weekAnchor ? new Date(weekAnchor + 'T00:00:00') : new Date()
-    const monday = startOfWeekMonday(anchor)
-    const sunday = new Date(monday)
-    sunday.setDate(monday.getDate() + 6)
-    const end = new Date(sunday)
-    end.setHours(23, 59, 59, 999)
-    return { start: monday, end }
-  }, [weekAnchor])
+  // ✅ Week range derived from FlowRangePicker (still treated as Mon→Sun by default)
+const weekRange = useMemo(() => {
+  const { start, end } = parseRange(range)
+
+  // fallback if empty
+  if (!start || !end) {
+    const a = startOfWeekMonday(new Date())
+    const b = new Date(a)
+    b.setDate(a.getDate() + 6)
+    b.setHours(23, 59, 59, 999)
+    return { start: a, end: b }
+  }
+
+  const s = new Date(start + 'T00:00:00')
+  const e = new Date(end + 'T23:59:59')
+  return { start: s, end: e }
+}, [range])
 
   const weekDays = useMemo(() => {
     const out: { key: string; label: string; isSunday: boolean }[] = []
@@ -231,17 +237,18 @@ export default function LeaderboardPage() {
           </div>
         )}
 
-        {/* ✅ Top-left week selector (FlowDatePicker — glass UI) */}
-        <div className="mb-6 max-w-[320px]">
-          <FlowDatePicker
-            value={weekAnchor}
-            onChange={(v) => setWeekAnchor(v || toISODateLocal(new Date()))}
-            placeholder="Select week"
-          />
-          <div className="mt-2 text-[11px] text-white/45">
-            Week: {toISODateLocal(weekRange.start)} → {toISODateLocal(weekRange.end)} (Mon → Sun)
-          </div>
-        </div>
+        {/* ✅ Top-left range selector (FlowRangePicker — glass UI) */}
+<div className="mb-6">
+  <FlowRangePicker
+    value={range}
+    onChange={(v) => setRange(v || getThisWeekRangeString())}
+    defaultPreset="THIS_WEEK"
+    placeholder="Select range"
+  />
+  <div className="mt-2 text-[11px] text-white/45">
+    Week: {toISODateLocal(weekRange.start)} → {toISODateLocal(weekRange.end)} (Mon → Sun)
+  </div>
+</div>
 
         {/* ✅ 3 stat cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
@@ -408,7 +415,7 @@ function PodiumCard({
           </div>
 
           <div className="mt-4 text-xs text-white/60">Total AP</div>
-          <div className={spotlight ? 'mt-1 text-3xl font-extrabold text-green-300' : 'mt-1 text-2xl font-bold text-green-300'}>
+          <div className={spotlight ? 'mt-1 text-2xl font-extrabold text-green-300' : 'mt-1 text-2xl font-bold text-green-300'}>
             {data ? `$${formatMoney(data.totalAP)}` : '—'}
           </div>
         </div>
@@ -464,6 +471,20 @@ function toISODateLocal(d: Date) {
   const m = String(dt.getMonth() + 1).padStart(2, '0')
   const day = String(dt.getDate()).padStart(2, '0')
   return `${y}-${m}-${day}`
+}
+
+function parseRange(value: string) {
+  if (!value) return { start: '', end: '' }
+  const [a, b] = value.split('|')
+  return { start: (a || '').trim(), end: (b || a || '').trim() }
+}
+
+function getThisWeekRangeString() {
+  const now = new Date()
+  const monday = startOfWeekMonday(now)
+  const sunday = new Date(monday)
+  sunday.setDate(monday.getDate() + 6)
+  return `${toISODateLocal(monday)}|${toISODateLocal(sunday)}`
 }
 
 function startOfWeekMonday(d: Date) {
