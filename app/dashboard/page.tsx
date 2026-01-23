@@ -377,8 +377,6 @@ const rangeEndDt = useMemo(() => {
   return now
 }, [rangeEndISO, now])
 
-const rangeDeals = useMemo(() => parsed.filter((d) => d.dt >= rangeStartDt && d.dt <= rangeEndDt), [parsed, rangeStartDt, rangeEndDt])
-
   const rangeDeals = useMemo(
     () => parsed.filter((d) => d.dt >= rangeStartDt && d.dt <= rangeEndDt),
     [parsed, rangeStartDt, rangeEndDt]
