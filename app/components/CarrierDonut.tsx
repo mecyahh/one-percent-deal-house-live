@@ -1,3 +1,4 @@
+// ✅ REPLACE ENTIRE FILE: /app/components/CarrierDonut.tsx
 'use client'
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
@@ -124,23 +125,53 @@ export default function CarrierDonut({
       {/* local CSS for badge pulse + pop */}
       <style jsx>{`
         @keyframes badgePulseSoft {
-          0% { transform: translateY(0px) scale(1); opacity: 1; }
-          50% { transform: translateY(-1px) scale(1.03); opacity: 0.95; }
-          100% { transform: translateY(0px) scale(1); opacity: 1; }
+          0% {
+            transform: translateY(0px) scale(1);
+            opacity: 1;
+          }
+          50% {
+            transform: translateY(-1px) scale(1.03);
+            opacity: 0.95;
+          }
+          100% {
+            transform: translateY(0px) scale(1);
+            opacity: 1;
+          }
         }
         @keyframes badgePulseStrong {
-          0% { transform: translateY(0px) scale(1); opacity: 1; }
-          50% { transform: translateY(-2px) scale(1.07); opacity: 0.95; }
-          100% { transform: translateY(0px) scale(1); opacity: 1; }
+          0% {
+            transform: translateY(0px) scale(1);
+            opacity: 1;
+          }
+          50% {
+            transform: translateY(-2px) scale(1.07);
+            opacity: 0.95;
+          }
+          100% {
+            transform: translateY(0px) scale(1);
+            opacity: 1;
+          }
         }
         @keyframes centerPop {
-          0% { transform: scale(1); }
-          45% { transform: scale(1.12); }
-          100% { transform: scale(1); }
+          0% {
+            transform: scale(1);
+          }
+          45% {
+            transform: scale(1.12);
+          }
+          100% {
+            transform: scale(1);
+          }
         }
-        .pulse-strong { animation: badgePulseStrong 1.35s ease-in-out infinite; }
-        .pulse-soft { animation: badgePulseSoft 1.8s ease-in-out infinite; }
-        .center-pop { animation: centerPop 360ms ease-out; }
+        .pulse-strong {
+          animation: badgePulseStrong 1.35s ease-in-out infinite;
+        }
+        .pulse-soft {
+          animation: badgePulseSoft 1.8s ease-in-out infinite;
+        }
+        .center-pop {
+          animation: centerPop 360ms ease-out;
+        }
       `}</style>
 
       <Doughnut data={data} options={options} plugins={glow ? [glowPlugin] : undefined} />
@@ -150,6 +181,15 @@ export default function CarrierDonut({
         <div className="text-[11px] text-white/60">Top Carrier</div>
         <div className="text-lg font-semibold truncate max-w-[240px]">{top.name}</div>
 
-        <div className={`text-xs font-semibold mt-1 ${pop ? 'center-pop' : ''}`} style={{ color: 'rgba(255,255,255,0.9)' }}>
+        <div
+          className={`text-xs font-semibold mt-1 ${pop ? 'center-pop' : ''}`}
+          style={{ color: 'rgba(255,255,255,0.9)' }}
+        >
           {top.pct}%
         </div>
+
+        {/* ✅ rank badges removed */}
+      </div>
+    </div>
+  )
+}
