@@ -131,11 +131,10 @@ export default function SettingsPage() {
 
   // Positions
   const [pos, setPos] = useState({
-    user_id: '',
-    upline_id: '',
-    comp: 70,
-    effective_date: '',
-  })
+  user_id: '',
+  upline_id: '',
+  comp: 70,
+})
   const [savingPosition, setSavingPosition] = useState(false)
 
   // Carriers
@@ -284,24 +283,34 @@ export default function SettingsPage() {
   }
 
   async function loadAgents() {
-    setLoadingAgents(true)
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(5000)
+  setLoadingAgents(true)
+  try {
+    // ✅ Pull all (or whatever RLS allows), then strictly scope to my subtree
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(5000)
 
-      if (error) throw error
-      setAgents((data || []) as Profile[])
-    } catch (e: any) {
-      setToast(`Could not load agents: ${errMsg(e)}`)
-      setAgents([])
-    } finally {
-      setLoadingAgents(false)
+    if (error) throw error
+
+    const all = (data || []) as Profile[]
+
+    // ✅ If I’m admin/owner: only show my subtree (me + descendants)
+    // ✅ If I’m a normal agent: only show me (but Agents tab won’t show anyway)
+    if (me?.id) {
+      const ids = new Set(buildTreeIds(me.id, all))
+      setAgents(all.filter((p) => ids.has(p.id)))
+    } else {
+      setAgents(all)
     }
+  } catch (e: any) {
+    setToast(`Could not load agents: ${errMsg(e)}`)
+    setAgents([])
+  } finally {
+    setLoadingAgents(false)
   }
-
+}
   const filteredAgents = useMemo(() => {
     const q = agentSearch.trim().toLowerCase()
     if (!q) return agents
@@ -422,14 +431,13 @@ export default function SettingsPage() {
           user_id: pos.user_id,
           upline_id: pos.upline_id || null,
           comp: pos.comp,
-          effective_date: pos.effective_date || null,
         }),
       })
 
       const json = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(json.error || 'Update failed')
 
-      setPos({ user_id: '', upline_id: '', comp: 70, effective_date: '' })
+      setPos({ user_id: '', upline_id: '', comp: 70 })
       await loadAgents()
     })
   }
@@ -910,13 +918,13 @@ export default function SettingsPage() {
                       </div>
                       <div className="col-span-1 flex justify-end">
                         <button
-                          onClick={() => deleteProduct(p)}
-                          disabled={productsSaving}
-                          className="rounded-xl border border-[var(--cardBorder)] bg-[var(--card)] hover:bg-red-600/30 transition px-2 py-2"
-                          title="Delete"
-                        >
-                          🗑
-                        </button>
+  onClick={() => deleteProduct(p)}
+  disabled={productsSaving}
+  className="rounded-xl bg-white/5 hover:bg-red-600/20 transition px-2.5 py-2 border border-white/10"
+  title="Delete"
+>
+  <IconTrash />
+</button>
                       </div>
                     </div>
                   )
@@ -1071,77 +1079,89 @@ export default function SettingsPage() {
               />
             </div>
 
-            <div className="rounded-2xl border border-[var(--cardBorder)] overflow-hidden">
-              <div className="grid grid-cols-12 px-4 py-3 border-b border-[var(--cardBorder)] text-[11px] text-[var(--muted)] bg-[var(--card)]">
-                <div className="col-span-3">Agent</div>
-                <div className="col-span-4">Email</div>
-                <div className="col-span-2 text-center">Role</div>
-                <div className="col-span-2 text-right">Comp</div>
-                <div className="col-span-1 text-right">Actions</div>
-              </div>
-
+            <div className="grid grid-cols-12 px-4 py-3 border-b border-white/10 text-[11px] text-[var(--muted)] bg-white/5">
+  <div className="col-span-3">Agent</div>
+  <div className="col-span-4">Email</div>
+  <div className="col-span-2 text-center">Role</div>
+  <div className="col-span-2">Upline</div>
+  <div className="col-span-1 text-right">Comp</div>
+  <div className="col-span-0 text-right" />
+</div>
               {loadingAgents && <div className="px-4 py-6 text-sm text-[var(--muted)]">Loading…</div>}
 
               {!loadingAgents &&
                 filteredAgents.map((a) => {
                   const name = `${a.first_name || '—'} ${a.last_name || ''}`.trim()
                   return (
-                    <div key={a.id} className="grid grid-cols-12 px-4 py-3 border-b border-[var(--cardBorder)] text-sm items-center">
-                      <div className="col-span-3 font-semibold">
-                        {name}
-                        {a.is_agency_owner ? (
-                          <span className="ml-2 text-[10px] px-2 py-1 rounded-xl border bg-[var(--card)] border-[var(--cardBorder)] text-[var(--muted)]">
-                            Owner
-                          </span>
-                        ) : null}
-                        {a.role === 'admin' ? (
-                          <span className="ml-2 text-[10px] px-2 py-1 rounded-xl border bg-[var(--card)] border-[var(--cardBorder)] text-[var(--muted)]">
-                            Admin
-                          </span>
-                        ) : null}
-                      </div>
+                    <div key={a.id} className="grid grid-cols-12 px-4 py-3 border-b border-white/10 text-sm items-center hover:bg-white/5 transition">
+  <div className="col-span-3 font-semibold">
+    {name}
+    {a.is_agency_owner ? (
+      <span className="ml-2 text-[10px] px-2 py-1 rounded-xl bg-white/5 text-white/70 border border-white/10">
+        Owner
+      </span>
+    ) : null}
+    {a.role === 'admin' ? (
+      <span className="ml-2 text-[10px] px-2 py-1 rounded-xl bg-white/5 text-white/70 border border-white/10">
+        Admin
+      </span>
+    ) : null}
+  </div>
 
-                      <div className="col-span-4 text-[var(--muted)]">{a.email || '—'}</div>
-                      <div className="col-span-2 text-center text-[var(--muted)]">{a.role || 'agent'}</div>
-                      <div className="col-span-2 text-right text-[var(--muted)]">{typeof a.comp === 'number' ? `${a.comp}%` : '—'}</div>
+  <div className="col-span-4 text-white/60">{a.email || '—'}</div>
 
-                      <div className="col-span-1 flex justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => openEdit(a)}
-                          className="rounded-xl border border-[var(--cardBorder)] bg-[var(--card)] hover:bg-white/10 transition px-2 py-2"
-                          title="Edit"
-                        >
-                          ✏️
-                        </button>
+  <div className="col-span-2 text-center text-white/60">{a.role || 'agent'}</div>
 
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            const ok = window.confirm(`Delete ${name}? This removes Auth + Profile.`)
-                            if (!ok) return
-                            try {
-                              const token = await authHeader()
-                              const res = await fetch('/api/admin/users/delete', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json', Authorization: token },
-                                body: JSON.stringify({ user_id: a.id }),
-                              })
-                              const json = await res.json().catch(() => ({}))
-                              if (!res.ok) throw new Error(json.error || 'Delete failed')
-                              setToast('User deleted ✅')
-                              await loadAgents()
-                            } catch (e: any) {
-                              setToast(errMsg(e))
-                            }
-                          }}
-                          className="rounded-xl border border-[var(--cardBorder)] bg-[var(--card)] hover:bg-red-600/30 transition px-2 py-2"
-                          title="Delete"
-                        >
-                          🗑
-                        </button>
-                      </div>
-                    </div>
+  <div className="col-span-2 text-white/60 truncate">
+    {a.upline_id ? (
+      <span className="px-2 py-1 rounded-xl bg-white/5 border border-white/10 text-[11px] text-white/70">
+        {(agents.find((x) => x.id === a.upline_id)?.first_name || '—')}{' '}
+        {(agents.find((x) => x.id === a.upline_id)?.last_name || '').trim()}
+      </span>
+    ) : (
+      '—'
+    )}
+  </div>
+
+  <div className="col-span-1 text-right text-white/60">{typeof a.comp === 'number' ? `${a.comp}%` : '—'}</div>
+
+  <div className="col-span-0 flex justify-end gap-2">
+    <button
+      type="button"
+      onClick={() => openEdit(a)}
+      className="rounded-xl bg-white/5 hover:bg-white/10 transition px-2.5 py-2 border border-white/10"
+      title="Edit"
+    >
+      <IconPencil />
+    </button>
+
+    <button
+      type="button"
+      onClick={async () => {
+        const ok = window.confirm(`Delete ${name}? This removes Auth + Profile.`)
+        if (!ok) return
+        try {
+          const token = await authHeader()
+          const res = await fetch('/api/admin/users/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: token },
+            body: JSON.stringify({ user_id: a.id }),
+          })
+          const json = await res.json().catch(() => ({}))
+          if (!res.ok) throw new Error(json.error || 'Delete failed')
+          setToast('User deleted ✅')
+          await loadAgents()
+        } catch (e: any) {
+          setToast(errMsg(e))
+        }
+      }}
+      className="rounded-xl bg-white/5 hover:bg-red-600/20 transition px-2.5 py-2 border border-white/10"
+      title="Delete"
+    >
+      <IconTrash />
+    </button>
+  </div>
+</div>
                   )
                 })}
 
@@ -1150,8 +1170,8 @@ export default function SettingsPage() {
 
             {/* INVITE MODAL */}
             {inviteOpen && (
-              <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/60 px-4">
-                <div className="w-full max-w-xl glass rounded-2xl border border-[var(--cardBorder)] p-6">
+              <div className="fixed inset-0 z-[150] flex items-start justify-center bg-black/60 px-4 pt-10 pb-10 overflow-auto">
+                <div className="w-full max-w-xl glass rounded-2xl border border-white/10 p-6 max-h-[85vh] overflow-auto">
                   <div className="flex items-start justify-between gap-4 mb-4">
                     <div>
                       <div className="text-sm font-semibold">Invite Agent</div>
@@ -1239,30 +1259,27 @@ export default function SettingsPage() {
         {tab === 'positions' && canManageAgents && (
           <div className="glass rounded-2xl border border-[var(--cardBorder)] p-6">
             <div className="text-sm font-semibold">Positions</div>
-            <div className="text-xs text-[var(--muted)] mt-1">Update upline + comp. (Effective date optional.)</div>
-
+            <div className="text-xs text-[var(--muted)] mt-1">
+  Update upline + comp. <span className="text-white/60">All hierarchy changes take effect immediately.</span>
+</div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-5">
-              <Field label="Select User">
-                <select className={inputCls} value={pos.user_id} onChange={(e) => setPos((p) => ({ ...p, user_id: e.target.value }))}>
-                  <option value="">select</option>
-                  {uplineOptions.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+              <Field label="Search User">
+  <SearchPick
+    placeholder="Type name or email…"
+    value={pos.user_id}
+    onChange={(id) => setPos((p) => ({ ...p, user_id: id }))}
+    options={uplineOptions}
+  />
+</Field>
 
-              <Field label="Upline">
-                <select className={inputCls} value={pos.upline_id} onChange={(e) => setPos((p) => ({ ...p, upline_id: e.target.value }))}>
-                  <option value="">select</option>
-                  {uplineOptions.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+              <Field label="Search Upline">
+  <SearchPick
+    placeholder="Type upline name/email…"
+    value={pos.upline_id}
+    onChange={(id) => setPos((p) => ({ ...p, upline_id: id }))}
+    options={[{ id: '', label: '— No upline —' }, ...uplineOptions]}
+  />
+</Field>
 
               <Field label="Comp">
                 <select className={inputCls} value={String(pos.comp)} onChange={(e) => setPos((p) => ({ ...p, comp: Number(e.target.value) }))}>
@@ -1272,10 +1289,6 @@ export default function SettingsPage() {
                     </option>
                   ))}
                 </select>
-              </Field>
-
-              <Field label="Effective Date (optional)">
-                <input className={inputCls} value={pos.effective_date} onChange={(e) => setPos((p) => ({ ...p, effective_date: e.target.value }))} placeholder="YYYY-MM-DD" />
               </Field>
             </div>
 
@@ -1328,7 +1341,7 @@ export default function SettingsPage() {
               <div className="rounded-2xl border border-[var(--cardBorder)] overflow-hidden">
                 <div className="grid grid-cols-12 px-4 py-3 border-b border-[var(--cardBorder)] text-[11px] text-[var(--muted)] bg-[var(--card)]">
                   <div className="col-span-3">Carrier</div>
-                  <div className="col-span-3">Supported Name</div>
+                  <div className="col-span-3">Nickname</div>
                   <div className="col-span-2 text-right">Advance</div>
                   <div className="col-span-1 text-right">Sort</div>
                   <div className="col-span-2 text-center">Products</div>
@@ -1354,23 +1367,23 @@ export default function SettingsPage() {
                     </div>
 
                     <div className="col-span-1 flex justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => openCarrierEdit(c)}
-                        className="rounded-xl border border-[var(--cardBorder)] bg-[var(--card)] hover:bg-white/10 transition px-2 py-2"
-                        title="Edit"
-                      >
-                        ✏️
-                      </button>
+                     <button
+  type="button"
+  onClick={() => openCarrierEdit(c)}
+  className="rounded-xl bg-white/5 hover:bg-white/10 transition px-2.5 py-2 border border-white/10"
+  title="Edit"
+>
+  <IconPencil />
+</button>
 
                       <button
-                        type="button"
-                        onClick={() => deleteCarrier(c)}
-                        className="rounded-xl border border-[var(--cardBorder)] bg-[var(--card)] hover:bg-red-600/30 transition px-2 py-2"
-                        title="Delete"
-                      >
-                        🗑
-                      </button>
+  type="button"
+  onClick={() => deleteCarrier(c)}
+  className="rounded-xl bg-white/5 hover:bg-red-600/20 transition px-2.5 py-2 border border-white/10"
+  title="Delete"
+>
+  <IconTrash />
+</button>
                     </div>
                   </div>
                 ))}
@@ -1467,6 +1480,58 @@ export default function SettingsPage() {
 }
 
 /* ---------- UI bits ---------- */
+function SearchPick({
+  options,
+  value,
+  onChange,
+  placeholder,
+}: {
+  options: { id: string; label: string }[]
+  value: string
+  onChange: (id: string) => void
+  placeholder?: string
+}) {
+  const [q, setQ] = useState('')
+  const shown = useMemo(() => {
+    const s = q.trim().toLowerCase()
+    if (!s) return options.slice(0, 12)
+    return options.filter((o) => o.label.toLowerCase().includes(s)).slice(0, 12)
+  }, [q, options])
+
+  const selectedLabel = useMemo(() => options.find((o) => o.id === value)?.label || '', [options, value])
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+      <input
+        className="bg-transparent outline-none text-sm w-full placeholder:text-white/40"
+        placeholder={placeholder || 'Search…'}
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+      />
+      <div className="mt-2 flex flex-wrap gap-2">
+        {shown.map((o) => {
+          const active = o.id === value
+          return (
+            <button
+              key={o.id || 'none'}
+              type="button"
+              onClick={() => onChange(o.id)}
+              className={[
+                'px-3 py-1.5 rounded-xl border text-[12px] transition',
+                active ? 'bg-white/10 border-white/20 text-white/90' : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10',
+              ].join(' ')}
+              title={o.label}
+            >
+              {o.label.length > 32 ? o.label.slice(0, 32) + '…' : o.label}
+            </button>
+          )
+        })}
+      </div>
+
+      {value ? <div className="mt-2 text-[11px] text-white/50">Selected: {selectedLabel}</div> : null}
+    </div>
+  )
+}
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -1507,3 +1572,91 @@ const saveWide =
 
 const dangerBtn =
   'rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-2 text-sm font-semibold hover:bg-red-500/15 transition'
+function IconPencil() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" className="text-white/80">
+      <path
+        d="M12 20h9"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity="0.85"
+      />
+      <path
+        d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4 11.5-11.5Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function IconTrash() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" className="text-white/80">
+      <path
+        d="M3 6h18"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity="0.9"
+      />
+      <path
+        d="M8 6V4h8v2"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity="0.9"
+      />
+      <path
+        d="M19 6l-1 14H6L5 6"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10 11v6M14 11v6"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity="0.9"
+      />
+    </svg>
+  )
+}
+
+function IconCalendar() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" className="text-white/80">
+      <path
+        d="M8 2v3M16 2v3"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M3 9h18"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity="0.9"
+      />
+      <path
+        d="M5 5h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
