@@ -605,7 +605,7 @@ if (json?.pin) {
     }
   }
 
-  async function addProduct() {
+    async function addProduct() {
     if (!productsCarrier) return
     await run(setProductsSaving, setToast, 'Product added', async () => {
       const name = newProduct.product_name.trim()
@@ -647,7 +647,6 @@ if (json?.pin) {
       if (productsCarrier) await openProducts(productsCarrier)
     })
   }
-
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
       <Sidebar />
