@@ -351,7 +351,7 @@ export default function MyAgencyPage() {
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">My Agency</h1>
             <p className="text-sm text-white/60 mt-1">
-              {canSeeTree ? 'Your tree only • direct + indirect downlines.' : 'Your stats only.'}
+              {canSeeTree ? 'Detailed Agency View' : 'Your stats only.'}
             </p>
           </div>
 
@@ -411,8 +411,8 @@ export default function MyAgencyPage() {
         {!canSeeTree && (
           <>
             <section className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-              <MiniStat label="Weekly Production (AP)" value={loading ? '—' : `$${formatMoney2(myStats.weeklyAP)}`} />
-              <MiniStat label="Monthly Production (AP)" value={loading ? '—' : `$${formatMoney2(myStats.monthlyAP)}`} />
+              <MiniStat label="Weekly Production" value={loading ? '—' : `$${formatMoney2(myStats.weeklyAP)}`} />
+              <MiniStat label="Monthly Production" value={loading ? '—' : `$${formatMoney2(myStats.monthlyAP)}`} />
               <MiniStat label="Writers" value={loading ? '—' : String(writersCount)} />
               <MiniStat label="New Writers" value={loading ? '—' : String(newWritersCount)} />
             </section>
@@ -448,7 +448,7 @@ export default function MyAgencyPage() {
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <div className="text-sm font-semibold">Top Producers</div>
-                  <div className="text-xs text-white/55 mt-1">Left: Top 3 • Right: Direct legs (% of total).</div>
+                  <div className="text-xs text-white/55 mt-1">Left: Top 3.</div>
                 </div>
                 <span className="inline-flex items-center gap-2 text-[11px] text-white/55">
                   <span className="px-2 py-1 rounded-xl border border-white/10 bg-white/5">Persistency: Coming soon</span>
@@ -472,7 +472,7 @@ export default function MyAgencyPage() {
                       <div className="text-xs text-white/55 mt-1">Direct downlines only • % of total AP.</div>
                     </div>
                     <span className="px-2 py-1 rounded-xl border border-white/10 bg-white/5 text-[11px] text-white/60">
-                      Coming soon: Persistency
+                      Nice Work !
                     </span>
                   </div>
 
@@ -584,7 +584,6 @@ export default function MyAgencyPage() {
             </div>
 
             <div className="mt-3 text-[11px] text-white/45">
-              Tree scope is strict: only you + your direct/indirect downlines. Filters only change what’s shown.
             </div>
           </>
         )}
