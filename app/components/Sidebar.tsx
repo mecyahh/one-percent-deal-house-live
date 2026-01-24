@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabaseClient'
 
 const NAV = [
   { label: 'Dashboard', href: '/dashboard' },
+  { label: 'My Agency', href: '/my-agency' }, // ✅ NEW
   { label: 'Leaderboard', href: '/leaderboard' },
   { label: 'Carrier Outline', href: '/carrier-outline' },
   { label: 'Post a Deal', href: '/post-deal' },
@@ -173,7 +174,7 @@ export default function Sidebar() {
       {/* Nav */}
       <nav className="flex flex-col gap-1.5">
         {NAV.map((item) => {
-          const active = pathname === item.href
+          const active = pathname === item.href || pathname.startsWith(item.href + '/')
           return (
             <Link
               key={item.href}
