@@ -96,7 +96,7 @@ export default function SettingsPage() {
   const [savingProfile, setSavingProfile] = useState(false)
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
 
-  // Agents
+    // Agents
   const [agents, setAgents] = useState<Profile[]>([])
   const [loadingAgents, setLoadingAgents] = useState(false)
   const [refreshingAgents, setRefreshingAgents] = useState(false)
@@ -131,10 +131,10 @@ export default function SettingsPage() {
 
   // Positions
   const [pos, setPos] = useState({
-  user_id: '',
-  upline_id: '',
-  comp: 70,
-})
+    user_id: '',
+    upline_id: '',
+    comp: 70,
+  })
   const [savingPosition, setSavingPosition] = useState(false)
 
   // Carriers
@@ -185,6 +185,25 @@ export default function SettingsPage() {
   const isOwner = !!me?.is_agency_owner
   const canManageAgents = !!(isAdmin || isOwner)
 
+  // ✅ subtree helper (fixes missing buildTreeIds)
+  function buildSubtreeIds(rootId: string, all: Profile[]) {
+    const ids = new Set<string>()
+    const q: string[] = [rootId]
+    ids.add(rootId)
+
+    while (q.length) {
+      const cur = q.shift()!
+      for (const p of all) {
+        if (p.upline_id === cur && !ids.has(p.id)) {
+          ids.add(p.id)
+          q.push(p.id)
+        }
+      }
+    }
+
+    return Array.from(ids)
+  }
+
   useEffect(() => {
     boot()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -218,8 +237,9 @@ export default function SettingsPage() {
       setPTheme(p.theme || 'blue')
       setAvatarPreview(p.avatar_url || '')
 
+      // ✅ IMPORTANT: loadAgents must use p.id (state update is async)
       if (p.role === 'admin' || !!p.is_agency_owner) {
-        await loadAgents()
+        await loadAgents(p.id)
         setTab('agents')
       } else {
         setTab('profile')
@@ -282,35 +302,30 @@ export default function SettingsPage() {
     })
   }
 
-  async function loadAgents() {
-  setLoadingAgents(true)
-  try {
-    // ✅ Pull all (or whatever RLS allows), then strictly scope to my subtree
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(5000)
+  // ✅ loadAgents now accepts rootId so boot() can scope correctly
+  async function loadAgents(rootId?: string) {
+    setLoadingAgents(true)
+    try {
+      const { data, error } = await supabase.from('profiles').select('*').order('created_at', { ascending: false }).limit(5000)
+      if (error) throw error
 
-    if (error) throw error
+      const all = (data || []) as Profile[]
+      const root = rootId || me?.id
 
-    const all = (data || []) as Profile[]
-
-    // ✅ If I’m admin/owner: only show my subtree (me + descendants)
-    // ✅ If I’m a normal agent: only show me (but Agents tab won’t show anyway)
-    if (me?.id) {
-      const ids = new Set(buildTreeIds(me.id, all))
-      setAgents(all.filter((p) => ids.has(p.id)))
-    } else {
-      setAgents(all)
+      if (root) {
+        const ids = new Set(buildSubtreeIds(root, all))
+        setAgents(all.filter((p) => ids.has(p.id)))
+      } else {
+        setAgents(all)
+      }
+    } catch (e: any) {
+      setToast(`Could not load agents: ${errMsg(e)}`)
+      setAgents([])
+    } finally {
+      setLoadingAgents(false)
     }
-  } catch (e: any) {
-    setToast(`Could not load agents: ${errMsg(e)}`)
-    setAgents([])
-  } finally {
-    setLoadingAgents(false)
   }
-}
+
   const filteredAgents = useMemo(() => {
     const q = agentSearch.trim().toLowerCase()
     if (!q) return agents
@@ -379,7 +394,7 @@ export default function SettingsPage() {
   }
 
   async function inviteAgent() {
-    await run(setInviting, setToast, 'Invite sent', async () => {
+    const pin = await run<string | null>(setInviting, setToast, 'Invite created', async () => {
       const token = await authHeader()
       if (!token) throw new Error('Not logged in')
       if (!invite.email.trim()) throw new Error('Email required')
@@ -403,10 +418,6 @@ export default function SettingsPage() {
       const json = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(json.error || 'Invite failed')
 
-// ✅ Show PIN to admin (until email send is wired)
-if (json?.pin) {
-  setToast(`Invite created ✅ PIN: ${json.pin}`)
-}
       setInviteOpen(false)
       setInvite({
         first_name: '',
@@ -418,8 +429,13 @@ if (json?.pin) {
         is_agency_owner: false,
         theme: 'blue',
       })
+
       await loadAgents()
+      return typeof json?.pin === 'string' ? json.pin : null
     })
+
+    // ✅ run() would overwrite the toast otherwise
+    if (pin) setToast(`Invite created ✅ PIN: ${pin}`)
   }
 
   async function updatePosition() {
@@ -572,9 +588,12 @@ if (json?.pin) {
     if (!ok) return
 
     await run(setRefreshingCarriers, setToast, 'Carrier deleted', async () => {
-      await supabase.from('carrier_products').delete().eq('carrier_id', c.id)
+      const { error: cpErr } = await supabase.from('carrier_products').delete().eq('carrier_id', c.id)
+      if (cpErr) throw cpErr
+
       const { error } = await supabase.from('carriers').delete().eq('id', c.id)
       if (error) throw error
+
       await loadCarriers()
     })
   }
@@ -589,7 +608,7 @@ if (json?.pin) {
     try {
       const { data, error } = await supabase
         .from('carrier_products')
-        .select('id,carrier_id,product_name,sort_order,is_active')
+        .select('id,carrier_id,product_name,sort_order,is_active,created_at')
         .eq('carrier_id', c.id)
         .order('sort_order', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: true })
@@ -605,7 +624,7 @@ if (json?.pin) {
     }
   }
 
-    async function addProduct() {
+  async function addProduct() {
     if (!productsCarrier) return
     await run(setProductsSaving, setToast, 'Product added', async () => {
       const name = newProduct.product_name.trim()
@@ -630,9 +649,12 @@ if (json?.pin) {
 
   async function toggleProduct(p: ProductRow) {
     await run(setProductsSaving, setToast, 'Product updated', async () => {
-      const nextActive = !(p.is_active !== false)
+      const currentlyActive = p.is_active !== false
+      const nextActive = !currentlyActive
+
       const { error } = await supabase.from('carrier_products').update({ is_active: nextActive }).eq('id', p.id)
       if (error) throw error
+
       if (productsCarrier) await openProducts(productsCarrier)
     })
   }
@@ -644,9 +666,11 @@ if (json?.pin) {
     await run(setProductsSaving, setToast, 'Product deleted', async () => {
       const { error } = await supabase.from('carrier_products').delete().eq('id', p.id)
       if (error) throw error
+
       if (productsCarrier) await openProducts(productsCarrier)
     })
   }
+
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
       <Sidebar />
@@ -680,11 +704,19 @@ if (json?.pin) {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Field label="First Name">
-                <input className={inputCls} value={edit.first_name} onChange={(e) => setEdit((p) => ({ ...p, first_name: e.target.value }))} />
+                <input
+                  className={inputCls}
+                  value={edit.first_name}
+                  onChange={(e) => setEdit((p) => ({ ...p, first_name: e.target.value }))}
+                />
               </Field>
 
               <Field label="Last Name">
-                <input className={inputCls} value={edit.last_name} onChange={(e) => setEdit((p) => ({ ...p, last_name: e.target.value }))} />
+                <input
+                  className={inputCls}
+                  value={edit.last_name}
+                  onChange={(e) => setEdit((p) => ({ ...p, last_name: e.target.value }))}
+                />
               </Field>
 
               <Field label="Role">
