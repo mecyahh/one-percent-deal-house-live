@@ -115,7 +115,7 @@ const [range, setRange] = useState<string>('') // FlowRangePicker will seed THIS
 // FlowRangePicker will seed THIS_WEEK when `range` is empty.
 setRange('')
 
-      const { data, error } = await base === 'admin' || profile.is_agency_owner))
+      const isOwnerOrAdmin = !!(profile && (profile.role === 'admin' || profile.is_agency_owner))
 
       // ✅ Build teamIds for non-admin users (so "agents with downlines show team production")
       let computedTeamIds: string[] = [user.id]
