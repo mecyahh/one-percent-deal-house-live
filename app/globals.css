@@ -125,3 +125,39 @@ body {
   border-radius: 16px;
 }
 
+/* ---- compatibility: page.tsx references --card ---- */
+:root {
+  --card: var(--panel);
+}
+
+/* ---- marketing logo styles (Semibold / Underline) ---- */
+.logo-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logo-text {
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: #fff;
+  position: relative;
+}
+
+.logo-text.w-600 {
+  font-weight: 650;
+}
+
+.line-accent.line-under {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  bottom: -6px;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  box-shadow: 0 0 18px var(--glow);
+  opacity: 0.95;
+}
