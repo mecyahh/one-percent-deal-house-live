@@ -1,250 +1,39 @@
-'use client'
+import './globals.css'
+import Sidebar from './components/Sidebar'
+import type { Metadata, Viewport } from 'next'
 
-import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
-import { useEffect, useMemo, useState } from 'react'
-import { supabase } from '@/lib/supabaseClient'
-
-const NAV = [
-  { label: 'Dashboard', href: '/dashboard' },
-  { label: 'My Agency', href: '/my-agency' },
-  { label: 'Leaderboard', href: '/leaderboard' },
-  { label: 'Carrier Outline', href: '/carrier-outline' },
-  { label: 'Post a Deal', href: '/post-deal' },
-  { label: 'Deal House', href: '/deal-house' },
-  { label: 'Follow Ups', href: '/follow-ups' },
-  { label: 'Analytics', href: '/analytics' },
-  { label: 'Settings', href: '/settings' },
-] as const
-
-type Me = {
-  id: string
-  name: string
-  email: string
-  avatarUrl: string
+export const metadata: Metadata = {
+  title: 'Flow',
+  description: 'Deal tracking',
+  icons: {
+    icon: '/favicon.svg',
+    shortcut: '/favicon.svg',
+    apple: '/favicon.svg',
+  },
 }
 
-export default function Sidebar() {
-  const pathname = usePathname()
-  const router = useRouter()
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+}
 
-  // ✅ Hide sidebar on auth screens
-  const hideOnRoutes = useMemo(() => {
-    const HIDE = ['/login', '/signup', '/forgot-password', '/reset-password']
-    return HIDE.some((r) => pathname === r || pathname.startsWith(r + '/'))
-  }, [pathname])
-
-  const [ready, setReady] = useState(false)
-  const [authed, setAuthed] = useState(false)
-  const [me, setMe] = useState<Me | null>(null)
-
-  // ✅ MOBILE: off-canvas open state
-  const [mobileOpen, setMobileOpen] = useState(false)
-
-  // ✅ Close sidebar when route changes (mobile)
-  useEffect(() => {
-    setMobileOpen(false)
-  }, [pathname])
-
-  useEffect(() => {
-    let alive = true
-
-    async function hydrateFromUser(u: any | null) {
-      if (!alive) return
-
-      if (!u) {
-        setAuthed(false)
-        setMe(null)
-        setReady(true)
-        return
-      }
-
-      setAuthed(true)
-
-      let avatarUrl = ''
-      let fullName = ''
-      let email = u.email || ''
-
-      try {
-        const { data: prof, error } = await supabase
-          .from('profiles')
-          .select('first_name,last_name,email,avatar_url')
-          .eq('id', u.id)
-          .single()
-
-        if (!error && prof) {
-          fullName = `${(prof as any).first_name || ''} ${(prof as any).last_name || ''}`.trim()
-          email = String((prof as any).email || email || '')
-          avatarUrl = String((prof as any).avatar_url || '')
-        }
-      } catch {}
-
-      const meta: any = u.user_metadata || {}
-      if (!avatarUrl) avatarUrl = String(meta.avatar_url || meta.picture || meta.photoURL || '')
-      if (!fullName) fullName = String(meta.full_name || meta.name || '').trim()
-
-      const name = fullName || (email ? email.split('@')[0] : 'Agent')
-
-      if (!alive) return
-      setMe({ id: u.id, name, email: email || '', avatarUrl })
-      setReady(true)
-    }
-
-    ;(async () => {
-      try {
-        const { data } = await supabase.auth.getUser()
-        await hydrateFromUser(data.user || null)
-      } catch {
-        if (!alive) return
-        setAuthed(false)
-        setMe(null)
-        setReady(true)
-      }
-    })()
-
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      hydrateFromUser(session?.user || null)
-    })
-
-    return () => {
-      alive = false
-      sub.subscription.unsubscribe()
-    }
-  }, [])
-
-  const initials = useMemo(() => {
-    const n = (me?.name || '').trim()
-    if (!n) return 'A'
-    const parts = n.split(' ').filter(Boolean)
-    const a = parts[0]?.[0] || 'A'
-    const b = parts.length > 1 ? parts[parts.length - 1]?.[0] : ''
-    return (a + b).toUpperCase()
-  }, [me?.name])
-
-  async function logout() {
-    try {
-      await supabase.auth.signOut()
-    } catch {}
-    router.push('/login')
-    router.refresh()
-  }
-
-  if (hideOnRoutes) return null
-  if (!ready) return null
-  if (!authed) return null
-
-  // ✅ MOBILE hamburger button (does NOT affect desktop)
-  const MobileButton = (
-    <button
-      onClick={() => setMobileOpen(true)}
-      className="md:hidden fixed left-4 top-4 z-[60] rounded-2xl border border-white/10 bg-[#070a12]/85 backdrop-blur-xl px-4 py-2 text-sm font-semibold text-white/90"
-    >
-      Menu
-    </button>
-  )
-
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <>
-      {MobileButton}
-
-      {/* ✅ MOBILE backdrop */}
-      <div
-        onClick={() => setMobileOpen(false)}
+    <html lang="en">
+      <body
         className={[
-          'md:hidden fixed inset-0 z-50 transition',
-          mobileOpen ? 'bg-black/55' : 'pointer-events-none bg-transparent',
-        ].join(' ')}
-      />
-
-      <aside
-        className={[
-          'fixed left-0 top-0 z-[55] h-screen w-72 p-6 border-r border-white/10 bg-[#070a12]/92 backdrop-blur-xl',
-          // ✅ DESKTOP: always visible as before
-          'md:translate-x-0 md:transition-none',
-          // ✅ MOBILE: off-canvas slide
-          'transition-transform duration-200 ease-out md:duration-0',
-          mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
+          'min-h-screen bg-[#0b0f1a] text-white overflow-x-hidden',
+          'pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]',
         ].join(' ')}
       >
-        {/* Header */}
-        <div className="mb-7 flex items-center gap-4">
-          <div className="relative h-20 w-20 rounded-full overflow-hidden border border-white/10 bg-white/5">
-            {me?.avatarUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={me.avatarUrl}
-                alt="Profile"
-                className="h-full w-full object-cover"
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <div className="h-full w-full flex items-center justify-center text-xl font-extrabold text-white/80">
-                {initials}
-              </div>
-            )}
+        <Sidebar />
 
-            <div className="pointer-events-none absolute inset-0">
-              <div className="absolute -inset-10 rounded-full bg-white/5 blur-2xl" />
-            </div>
-          </div>
-
-          <div className="min-w-0">
-            <div className="text-lg font-semibold tracking-tight leading-tight">
-              {me?.name ? me.name : 'Deal tracking'}
-            </div>
-            <div className="text-lg font-semibold tracking-tight leading-tight">Flow</div>
-          </div>
-        </div>
-
-        {/* Nav */}
-        <nav className="flex flex-col gap-1.5">
-          {NAV.map((item) => {
-            const active = pathname === item.href || pathname.startsWith(item.href + '/')
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={[
-                  'rounded-xl px-4 py-3 transition border flex items-center justify-between',
-                  'text-[12.5px] font-medium',
-                  active
-                    ? 'bg-white/10 border-white/15'
-                    : 'bg-transparent border-transparent hover:bg-white/5 hover:border-white/10',
-                ].join(' ')}
-                onClick={() => setMobileOpen(false)}
-              >
-                <span className="text-white/90">{item.label}</span>
-                {active ? (
-                  <span
-                    className="h-2 w-2 rounded-full"
-                    style={{
-                      background: 'var(--accent)',
-                      boxShadow: '0 0 18px var(--glow)',
-                    }}
-                  />
-                ) : null}
-              </Link>
-            )
-          })}
-        </nav>
-
-        {/* Bottom */}
-        <div className="absolute bottom-6 left-6 right-6">
-          <div className="h-px bg-white/10 mb-4" />
-
-          <button
-            onClick={logout}
-            className={[
-              'w-full rounded-2xl border border-white/10 bg-white/5 transition px-4 py-3 text-[13px] font-semibold text-white/85',
-              'hover:bg-red-500/15 hover:border-red-400/25 hover:text-red-200',
-            ].join(' ')}
-          >
-            Logout
-          </button>
-
-          <div className="mt-3 h-2" />
-        </div>
-      </aside>
-    </>
+        {/* ✅ key change: content uses a CSS variable (0 on mobile, 288px on desktop when sidebar is present) */}
+        <main className="min-h-screen w-full transition-[padding] duration-200 pl-[var(--sidebar-offset)]">
+          {children}
+        </main>
+      </body>
+    </html>
   )
 }
