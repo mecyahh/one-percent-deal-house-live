@@ -361,7 +361,6 @@ export default function MyAgencyPage() {
 
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
-      <Sidebar />
 
       {toast && (
         <div className="fixed top-5 right-5 z-50">
