@@ -26,11 +26,11 @@ export async function POST(req: Request) {
 
     const baseUrl =
       process.env.NEXT_PUBLIC_APP_URL ||
-      process.env.VERCEL_URL?.startsWith('http')
-        ? process.env.VERCEL_URL
-        : process.env.VERCEL_URL
-        ? `https://${process.env.VERCEL_URL}`
-        : ''
+      (process.env.VERCEL_URL
+        ? process.env.VERCEL_URL.startsWith('http')
+          ? process.env.VERCEL_URL
+          : `https://${process.env.VERCEL_URL}`
+        : '')
 
     const redirectTo = baseUrl ? `${baseUrl}/login` : undefined
 
@@ -56,7 +56,7 @@ export async function POST(req: Request) {
 
     if (inviteErr) return NextResponse.json({ error: inviteErr.message }, { status: 400 })
 
-    // 3️⃣ Upsert profile (avoid TS "never" by using insert + upsert)
+    // 3️⃣ Upsert profile (cast to any to avoid TS "never" inference)
     const payload = {
       id: userId,
       email,
@@ -69,10 +69,9 @@ export async function POST(req: Request) {
       theme,
     }
 
-    const { error: profErr } = await supabaseAdmin
+    const { error: profErr } = await (supabaseAdmin as any)
       .from('profiles')
-      .insert(payload as any, { upsert: true, onConflict: 'id' })
-      .select('id')
+      .upsert(payload, { onConflict: 'id' })
 
     if (profErr) return NextResponse.json({ error: profErr.message }, { status: 400 })
 
