@@ -24,13 +24,10 @@ type Me = {
   avatarUrl: string
 }
 
-const SIDEBAR_PX = 288 // w-72
-
 export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
 
-  // ✅ Hide sidebar on auth screens
   const hideOnRoutes = useMemo(() => {
     const HIDE = ['/login', '/signup', '/forgot-password', '/reset-password']
     return HIDE.some((r) => pathname === r || pathname.startsWith(r + '/'))
@@ -40,36 +37,11 @@ export default function Sidebar() {
   const [authed, setAuthed] = useState(false)
   const [me, setMe] = useState<Me | null>(null)
 
-  // ✅ MOBILE: off-canvas open state
   const [mobileOpen, setMobileOpen] = useState(false)
 
-  // ✅ Close sidebar when route changes (mobile)
   useEffect(() => {
     setMobileOpen(false)
   }, [pathname])
-
-  // ✅ Control global content offset (NO MOBILE NARROW / NO LOGIN IMPACT)
-  useEffect(() => {
-    const root = document.documentElement
-
-    // If sidebar hidden or not authed/ready, force offset to 0
-    if (hideOnRoutes || !ready || !authed) {
-      root.style.setProperty('--sidebar-offset', '0px')
-      return
-    }
-
-    const mq = window.matchMedia('(min-width: 768px)') // Tailwind md
-    const apply = () => {
-      root.style.setProperty('--sidebar-offset', mq.matches ? `${SIDEBAR_PX}px` : '0px')
-    }
-
-    apply()
-    mq.addEventListener?.('change', apply)
-    return () => {
-      mq.removeEventListener?.('change', apply)
-      root.style.setProperty('--sidebar-offset', '0px')
-    }
-  }, [hideOnRoutes, ready, authed])
 
   useEffect(() => {
     let alive = true
@@ -160,7 +132,7 @@ export default function Sidebar() {
 
   return (
     <>
-      {/* ✅ MOBILE hamburger button (desktop unaffected) */}
+      {/* Mobile hamburger */}
       <button
         onClick={() => setMobileOpen(true)}
         className="md:hidden fixed left-4 top-4 z-[60] rounded-2xl border border-white/10 bg-[#070a12]/85 backdrop-blur-xl px-4 py-2 text-sm font-semibold text-white/90"
@@ -168,7 +140,7 @@ export default function Sidebar() {
         Menu
       </button>
 
-      {/* ✅ MOBILE backdrop */}
+      {/* Mobile backdrop */}
       <div
         onClick={() => setMobileOpen(false)}
         className={[
@@ -179,15 +151,18 @@ export default function Sidebar() {
 
       <aside
         className={[
+          // ✅ Desktop: in-flow sidebar (NO fixed). This is the key fix.
+          'hidden md:flex md:flex-col md:w-72 md:shrink-0 md:min-h-screen',
+          'md:border-r md:border-white/10 md:bg-[#070a12]/92 md:backdrop-blur-xl md:p-6',
+
+          // ✅ Mobile: fixed off-canvas
+          'md:static',
           'fixed left-0 top-0 z-[55] h-screen w-72 p-6 border-r border-white/10 bg-[#070a12]/92 backdrop-blur-xl',
-          // ✅ Desktop: visible
-          'md:translate-x-0 md:transition-none',
-          // ✅ Mobile: off-canvas
-          'transition-transform duration-200 ease-out',
+          'transition-transform duration-200 ease-out md:translate-x-0 md:transition-none',
           mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
         ].join(' ')}
       >
-        {/* ✅ Mobile close button */}
+        {/* Mobile close */}
         <button
           onClick={() => setMobileOpen(false)}
           className="md:hidden absolute right-4 top-4 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white/80 hover:bg-white/10"
@@ -258,7 +233,7 @@ export default function Sidebar() {
         </nav>
 
         {/* Bottom */}
-        <div className="absolute bottom-6 left-6 right-6">
+        <div className="mt-auto pt-6">
           <div className="h-px bg-white/10 mb-4" />
 
           <button
@@ -270,8 +245,6 @@ export default function Sidebar() {
           >
             Logout
           </button>
-
-          <div className="mt-3 h-2" />
         </div>
       </aside>
     </>
