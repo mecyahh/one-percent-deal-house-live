@@ -1,3 +1,4 @@
+// ✅ REPLACE ENTIRE FILE: /app/layout.tsx
 import './globals.css'
 import Sidebar from './components/Sidebar'
 import type { Metadata, Viewport } from 'next'
@@ -27,15 +28,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           'pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]',
         ].join(' ')}
       >
-        {/* Desktop shell: real flex layout (no fake padding offset) */}
-        <div className="min-h-screen md:flex">
-          <Sidebar />
+        {/* ✅ ONLY RENDER SIDEBAR HERE */}
+        <Sidebar />
 
-          {/* Main content */}
-          <main className="min-h-screen flex-1 min-w-0">
-            {children}
-          </main>
-        </div>
+        {/* ✅ content offset controlled by Sidebar via --sidebar-offset */}
+        <main className="min-h-screen w-full pl-[var(--sidebar-offset)] transition-[padding] duration-200">
+          {children}
+        </main>
       </body>
     </html>
   )
