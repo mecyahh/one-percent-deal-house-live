@@ -256,37 +256,37 @@ export default function AnalyticsPage() {
   }, [agents])
 
   const parsed = useMemo((): ParsedDeal[] => {
-  return deals.map((d) => {
-    const dt = d.created_at ? new Date(d.created_at) : new Date()
+    return deals.map((d) => {
+      const dt = d.created_at ? new Date(d.created_at) : new Date()
 
-    const premiumNum =
-      typeof d.premium === 'number'
-        ? d.premium
-        : typeof d.premium === 'string'
-        ? Number(d.premium.replace(/[^0-9.]/g, ''))
-        : Number(d.premium || 0)
+      const premiumNum =
+        typeof d.premium === 'number'
+          ? d.premium
+          : typeof d.premium === 'string'
+          ? Number(d.premium.replace(/[^0-9.]/g, ''))
+          : Number(d.premium || 0)
 
-    const p = Number.isFinite(premiumNum) ? premiumNum : 0
-    const annual = p * 12
+      const p = Number.isFinite(premiumNum) ? premiumNum : 0
+      const annual = p * 12
 
-    const companySafe = (d.company || 'Other').trim() || 'Other'
+      const companySafe = (d.company || 'Other').trim() || 'Other'
 
-    const prof = d.agent_id ? agentsById.get(d.agent_id) : null
-    const agentSafe = prof ? displayName(prof) : d.agent_id ? 'Agent' : '—'
+      const prof = d.agent_id ? agentsById.get(d.agent_id) : null
+      const agentSafe = prof ? displayName(prof) : d.agent_id ? 'Agent' : '—'
 
-    const sourceSafe = String((d as any).source || 'Unknown').trim() || 'Unknown'
+      const sourceSafe = String((d as any).source || 'Unknown').trim() || 'Unknown'
 
-    return {
-      ...d,
-      dt,
-      premiumNum: p,
-      annualNum: annual,
-      companySafe,
-      agentSafe,
-      sourceSafe,
-    }
-  })
-}, [deals, agentsById])
+      return {
+        ...d,
+        dt,
+        premiumNum: p,
+        annualNum: annual,
+        companySafe,
+        agentSafe,
+        sourceSafe,
+      }
+    })
+  }, [deals, agentsById])
 
   /* ---------------- KPIs ---------------- */
 
@@ -431,10 +431,9 @@ export default function AnalyticsPage() {
     const values = top.length ? top.map((e) => e[1]) : [100]
     return { labels, values }
   }, [parsed])
-  
+
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
-
       {toast && (
         <div className="fixed top-5 right-5 z-50">
           <div className="glass px-5 py-4 rounded-2xl border border-white/10 shadow-2xl">
@@ -456,13 +455,7 @@ export default function AnalyticsPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* ✅ Toggle (Personal orange default, Team fuchsia) */}
-            <ModeToggle
-              canTeam={canTeamView}
-              isOwner={isOwner}
-              mode={mode}
-              onChange={(m) => setMode(m)}
-            />
+            <ModeToggle canTeam={canTeamView} isOwner={isOwner} mode={mode} onChange={(m) => setMode(m)} />
 
             <button onClick={() => loadData()} className={btnGlass}>
               Refresh
@@ -495,7 +488,9 @@ export default function AnalyticsPage() {
         </section>
 
         {/* ADVANCED KPIs */}
+        {/* ✅ CHANGE: Deal Sources is now its OWN card (not inside another card) */}
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+          {/* 1) Avg time between deals */}
           <div className="glass rounded-2xl border border-white/10 p-6">
             <div className="text-sm font-semibold">Average time between deals</div>
             <div className="text-xs text-white/55 mt-1">Average gap between consecutive deal submissions.</div>
@@ -506,32 +501,42 @@ export default function AnalyticsPage() {
             </div>
           </div>
 
+          {/* 2) Avg annual premium per agent (unchanged, donut removed from inside) */}
           <div className="glass rounded-2xl border border-white/10 p-6">
             <div className="text-sm font-semibold">Average annual premium per agent</div>
             <div className="text-xs text-white/55 mt-1">Average annual total per active agent in range.</div>
 
-            <div className="glass p-6">
-  <div className="flex items-center justify-between mb-4">
-    <h2 className="text-base font-semibold">Deal Sources</h2>
-    <span className="text-xs text-white/60">Deals closed by source</span>
-  </div>
-
-  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-    <DealSourceDonut labels={sourceDist.labels} values={sourceDist.values} glow />
-  </div>
-
-  <div className="mt-3 text-xs text-white/50">Hover to view: Deal Source + Deals Closed.</div>
-</div>
-            
             <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
               <div className="text-xs text-white/50">Avg</div>
               <div className="mt-1 text-3xl font-semibold">{loading ? '—' : `$${formatMoney2(avgAnnualPerAgent)}`}</div>
             </div>
           </div>
 
-          {/* Collapsible under 5k */}
+          {/* 3) ✅ Deal Sources (NEW standalone KPI card) */}
           <div className="glass rounded-2xl border border-white/10 p-6">
-            <button type="button" onClick={() => setUnderOpen((s) => !s)} className="w-full flex items-center justify-between">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-semibold">Deal Sources</h2>
+              <span className="text-xs text-white/60">Deals closed by source</span>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <DealSourceDonut labels={sourceDist.labels} values={sourceDist.values} glow />
+            </div>
+
+            <div className="mt-3 text-xs text-white/50">
+              Hover to view: Deal Source • Deals Closed • Percentage of Business.
+            </div>
+          </div>
+        </section>
+
+        {/* Collapsible under 5k */}
+        <section className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+          <div className="glass rounded-2xl border border-white/10 p-6">
+            <button
+              type="button"
+              onClick={() => setUnderOpen((s) => !s)}
+              className="w-full flex items-center justify-between"
+            >
               <div className="text-left">
                 <div className="text-sm font-semibold">Agents under ${formatMoney2(UNDER_5K_ANNUAL)} (Annual)</div>
                 <div className="text-xs text-white/55 mt-1">Collapsible for a cleaner look.</div>
@@ -559,6 +564,9 @@ export default function AnalyticsPage() {
               </>
             )}
           </div>
+          {/* (the other 2 columns in this row are intentionally empty to preserve layout) */}
+          <div className="hidden lg:block" />
+          <div className="hidden lg:block" />
         </section>
 
         {/* TREND + BREAKDOWNS */}
@@ -584,7 +592,6 @@ export default function AnalyticsPage() {
             </div>
           </div>
 
-          {/* ✅ By Carrier ONLY when Owner + Team mode */}
           {teamModeAllowed ? (
             <div className="glass rounded-2xl border border-white/10 p-6">
               <div className="text-base font-semibold mb-4">Team By Carrier (Annual)</div>
@@ -609,7 +616,11 @@ export default function AnalyticsPage() {
 
         {/* NON WRITERS (collapsible) */}
         <section className="mt-6 glass rounded-2xl border border-white/10 p-6">
-          <button type="button" onClick={() => setNonWriterOpen((s) => !s)} className="w-full flex items-center justify-between mb-2">
+          <button
+            type="button"
+            onClick={() => setNonWriterOpen((s) => !s)}
+            className="w-full flex items-center justify-between mb-2"
+          >
             <div className="text-left">
               <h2 className="text-base font-semibold">Non Writers</h2>
               <div className="text-xs text-white/55 mt-1">Agents with 0 deals in the selected range.</div>
@@ -654,7 +665,6 @@ function ModeToggle({
   mode: 'personal' | 'team'
   onChange: (m: 'personal' | 'team') => void
 }) {
-  // team is only meaningful for owners. If admin, we still hide team to avoid “company analytics”.
   if (!canTeam || !isOwner) {
     return (
       <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-xs text-white/60">
@@ -723,7 +733,12 @@ function Row({
   dangerRight?: boolean
 }) {
   return (
-    <div className={['grid grid-cols-3 px-4 py-3 border-b border-white/10', head ? 'text-xs text-white/60 bg-white/5' : 'text-sm'].join(' ')}>
+    <div
+      className={[
+        'grid grid-cols-3 px-4 py-3 border-b border-white/10',
+        head ? 'text-xs text-white/60 bg-white/5' : 'text-sm',
+      ].join(' ')}
+    >
       <div className="truncate">{left}</div>
       <div className={['text-center truncate', dangerMid ? 'text-red-400 font-semibold' : ''].join(' ')}>{mid}</div>
       <div className={['text-right truncate', dangerRight ? 'text-red-400 font-semibold' : ''].join(' ')}>{right}</div>
@@ -731,12 +746,6 @@ function Row({
   )
 }
 
-/**
- * Mini chart with:
- * - horizontal + vertical grid
- * - points
- * - hover tracking + tooltip
- */
 function MiniAreaChart({ data, max, labels }: { data: number[]; max: number; labels: string[] }) {
   const w = 820
   const h = 180
@@ -774,7 +783,12 @@ function MiniAreaChart({ data, max, labels }: { data: number[]; max: number; lab
   const hover = hoverIdx !== null && ptsArr[hoverIdx] ? ptsArr[hoverIdx] : null
 
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-[180px]" onMouseMove={onMove} onMouseLeave={() => setHoverIdx(null)}>
+    <svg
+      viewBox={`0 0 ${w} ${h}`}
+      className="w-full h-[180px]"
+      onMouseMove={onMove}
+      onMouseLeave={() => setHoverIdx(null)}
+    >
       <defs>
         <linearGradient id="flowArea" x1="0" x2="0" y1="0" y2="1">
           <stop offset="0%" stopColor="rgba(59,130,246,0.35)" />
@@ -809,8 +823,19 @@ function MiniAreaChart({ data, max, labels }: { data: number[]; max: number; lab
 
       {ptsArr.length > 0 && (
         <>
-          <polyline points={`${pts} ${w - pad},${h - pad} ${pad},${h - pad}`} fill="url(#flowArea)" stroke="none" />
-          <polyline points={pts} fill="none" stroke="rgba(59,130,246,0.9)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+          <polyline
+            points={`${pts} ${w - pad},${h - pad} ${pad},${h - pad}`}
+            fill="url(#flowArea)"
+            stroke="none"
+          />
+          <polyline
+            points={pts}
+            fill="none"
+            stroke="rgba(59,130,246,0.9)"
+            strokeWidth="2.5"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
           {ptsArr.map((p, i) => (
             <circle
               key={i}
@@ -840,7 +865,15 @@ function MiniAreaChart({ data, max, labels }: { data: number[]; max: number; lab
 
               return (
                 <>
-                  <rect x={x} y={y} width={bw} height={bh} rx={10} fill="rgba(11,15,26,0.92)" stroke="rgba(255,255,255,0.10)" />
+                  <rect
+                    x={x}
+                    y={y}
+                    width={bw}
+                    height={bh}
+                    rx={10}
+                    fill="rgba(11,15,26,0.92)"
+                    stroke="rgba(255,255,255,0.10)"
+                  />
                   <text x={x + 12} y={y + 20} fill="rgba(255,255,255,0.75)" fontSize="11">
                     {dayLabel}
                   </text>
