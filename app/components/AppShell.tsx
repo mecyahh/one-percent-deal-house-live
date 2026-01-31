@@ -1,0 +1,37 @@
+'use client'
+
+import { usePathname } from 'next/navigation'
+import Sidebar from './Sidebar'
+
+function isAuthRoute(pathname: string) {
+  // Add/remove routes here if needed
+  if (pathname === '/') return true
+  if (pathname.startsWith('/login')) return true
+  if (pathname.startsWith('/signup')) return true
+  if (pathname.startsWith('/auth')) return true
+  if (pathname.startsWith('/forgot')) return true
+  if (pathname.startsWith('/reset')) return true
+  return false
+}
+
+export default function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname()
+  const hideSidebar = isAuthRoute(pathname)
+
+  if (hideSidebar) {
+    return (
+      <main className="min-h-screen w-full px-4 py-6 md:px-10 md:py-10">
+        {children}
+      </main>
+    )
+  }
+
+  return (
+    <div className="min-h-screen w-full flex">
+      <Sidebar />
+      <main className="flex-1 min-w-0 px-4 py-6 md:px-8 md:py-8">
+        {children}
+      </main>
+    </div>
+  )
+}
