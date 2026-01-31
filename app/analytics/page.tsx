@@ -485,6 +485,19 @@ export default function AnalyticsPage() {
             <div className="text-sm font-semibold">Average annual premium per agent</div>
             <div className="text-xs text-white/55 mt-1">Average annual total per active agent in range.</div>
 
+            <div className="glass p-6">
+  <div className="flex items-center justify-between mb-4">
+    <h2 className="text-base font-semibold">Deal Sources</h2>
+    <span className="text-xs text-white/60">Deals closed by source</span>
+  </div>
+
+  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+    <DealSourceDonut labels={sourceDist.labels} values={sourceDist.values} glow />
+  </div>
+
+  <div className="mt-3 text-xs text-white/50">Hover to view: Deal Source + Deals Closed.</div>
+</div>
+            
             <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
               <div className="text-xs text-white/50">Avg</div>
               <div className="mt-1 text-3xl font-semibold">{loading ? '—' : `$${formatMoney2(avgAnnualPerAgent)}`}</div>
