@@ -10,6 +10,7 @@
 export const dynamic = 'force-dynamic'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import GlassSelect from '@/app/components/GlassSelect'
 import Sidebar from '../components/Sidebar'
 import { supabase } from '@/lib/supabaseClient'
 import FlowDatePicker from '@/app/components/FlowDatePicker'
@@ -654,18 +655,12 @@ export default function DealHousePage() {
               </Field>
 
               <Field label="Status">
-                <select
-                  className={inputCls}
-                  value={(editing.status || 'pending').toLowerCase()}
-                  onChange={(e) => setEditing({ ...editing, status: e.target.value })}
-                >
-                  {STATUS.map((s) => (
-                    <option key={s.v} value={s.v}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+  <GlassSelect
+    value={(editing.status || 'pending').toLowerCase()}
+    onChange={(v) => setEditing({ ...editing, status: v })}
+    options={STATUS.map((s) => ({ value: s.v, label: s.label }))}
+  />
+</Field>
 
               <Field label="Coverage">
                 <input
