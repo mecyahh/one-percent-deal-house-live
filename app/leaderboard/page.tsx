@@ -280,7 +280,7 @@ const weekRange = useMemo(() => {
             <div className="text-xs text-white/60">{loading ? 'Loading…' : `${rest.length} agents`}</div>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto lg:overflow-x-visible">
             <table className="w-full text-sm">
               <thead className="text-[11px] text-white/55">
                 <tr className="border-b border-white/10">
