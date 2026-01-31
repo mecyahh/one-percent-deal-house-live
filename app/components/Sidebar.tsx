@@ -79,7 +79,7 @@ export default function Sidebar() {
   const DesktopNav = (
     <aside
       className="
-        hidden md:flex md:flex-col md:sticky md:top-0 md:h-screen md:w-72
+        hidden md:flex md:flex-col md:sticky md:top-0 md:h-screen md:w-64
         bg-[#0b0f1a]/90 backdrop-blur-xl
         border-r border-white/10
       "
