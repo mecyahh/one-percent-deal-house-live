@@ -1,9 +1,8 @@
-// ✅ REPLACE ENTIRE FILE: /app/components/Sidebar.tsx
 'use client'
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 const NAV = [
   { label: 'Dashboard', href: '/dashboard' },
@@ -17,15 +16,169 @@ const NAV = [
   { label: 'Settings', href: '/settings' },
 ]
 
+function getInitials(name?: string) {
+  if (!name) return 'U'
+  const parts = name.trim().split(/\s+/).slice(0, 2)
+  const initials = parts.map((p) => p[0]?.toUpperCase()).join('')
+  return initials || 'U'
+}
+
+function safeParseJSON<T = any>(v: string | null): T | null {
+  if (!v) return null
+  try {
+    return JSON.parse(v) as T
+  } catch {
+    return null
+  }
+}
+
 export default function Sidebar() {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
 
-  return (
+  // Best-effort user display (won't break if your app stores it differently)
+  const user = useMemo(() => {
+    if (typeof window === 'undefined') return null as any
+
+    const a = safeParseJSON<any>(localStorage.getItem('flow_user'))
+    const b = safeParseJSON<any>(localStorage.getItem('user'))
+    const c = safeParseJSON<any>(localStorage.getItem('supabase.auth.token'))
+    const tokenUser =
+      c?.currentSession?.user ??
+      c?.currentSession?.user?.user_metadata ??
+      c?.user ??
+      null
+
+    const u = a ?? b ?? tokenUser ?? null
+    const meta = u?.user_metadata ?? u?.metadata ?? u ?? {}
+
+    const name =
+      meta?.full_name ||
+      meta?.name ||
+      meta?.display_name ||
+      u?.name ||
+      u?.email ||
+      'User'
+
+    const avatarUrl =
+      meta?.avatar_url ||
+      meta?.picture ||
+      meta?.photoURL ||
+      u?.avatar_url ||
+      u?.picture ||
+      null
+
+    return { name, avatarUrl }
+  }, [])
+
+  useEffect(() => {
+    // Close mobile drawer on route change
+    setOpen(false)
+  }, [pathname])
+
+  const DesktopNav = (
+    <aside
+      className="
+        hidden md:flex md:flex-col md:sticky md:top-0 md:h-screen md:w-72
+        bg-[#0b0f1a]/90 backdrop-blur-xl
+        border-r border-white/10
+      "
+    >
+      <div className="p-6 pb-4">
+        <div className="flex items-center justify-between">
+          <div className="group select-none">
+            <div className="text-[13px] tracking-[0.22em] text-white/50 uppercase">Flow</div>
+            <div className="text-xl font-semibold leading-tight transition-transform duration-200 group-hover:scale-[1.03]">
+              Dashboard
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-full border border-white/10 bg-white/5 overflow-hidden flex items-center justify-center">
+              {user?.avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={user.avatarUrl}
+                  alt="Profile"
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <span className="text-xs font-semibold text-white/80">
+                  {getInitials(user?.name)}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+          <div className="text-xs text-white/50">Signed in as</div>
+          <div className="mt-0.5 text-sm font-medium truncate">{user?.name ?? 'User'}</div>
+        </div>
+      </div>
+
+      <div className="px-4 pb-6">
+        <nav className="flex flex-col gap-1.5">
+          {NAV.map((item) => {
+            const active = pathname === item.href || pathname.startsWith(item.href + '/')
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={[
+                  'group relative px-4 py-3 rounded-2xl border text-sm transition-all duration-200',
+                  'hover:-translate-y-[1px] hover:shadow-[0_10px_35px_-18px_rgba(255,255,255,0.25)]',
+                  active
+                    ? 'bg-white/10 border-white/20'
+                    : 'border-transparent hover:bg-white/[0.06]',
+                ].join(' ')}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <span
+                    className={[
+                      'transition-all duration-200',
+                      'group-hover:text-[15px] group-hover:tracking-wide',
+                      active ? 'text-white' : 'text-white/90',
+                    ].join(' ')}
+                  >
+                    {item.label}
+                  </span>
+                </span>
+                <span
+                  className={[
+                    'pointer-events-none absolute inset-x-3 bottom-2 h-px rounded-full opacity-0 transition-opacity duration-200',
+                    'bg-gradient-to-r from-transparent via-white/30 to-transparent',
+                    active ? 'opacity-100' : 'group-hover:opacity-60',
+                  ].join(' ')}
+                />
+              </Link>
+            )
+          })}
+        </nav>
+      </div>
+
+      <div className="mt-auto p-6 pt-0">
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+          <div className="text-xs text-white/50">Tip</div>
+          <div className="mt-1 text-sm text-white/85">
+            Hover a tab to “pop” it — keeps the UI feeling alive.
+          </div>
+        </div>
+      </div>
+    </aside>
+  )
+
+  const MobileDrawer = (
     <>
       <button
         onClick={() => setOpen(true)}
-        className="md:hidden fixed top-4 left-4 z-50 bg-[#070a12] border border-white/10 px-4 py-2 rounded-xl"
+        className="
+          md:hidden fixed top-4 left-4 z-50
+          rounded-2xl border border-white/10
+          bg-[#0b0f1a]/85 backdrop-blur-xl
+          px-4 py-2 text-sm
+          shadow-[0_12px_40px_-24px_rgba(0,0,0,0.9)]
+        "
       >
         Menu
       </button>
@@ -37,38 +190,73 @@ export default function Sidebar() {
 
       <aside
         className={`
-          fixed top-0 left-0 z-50 h-screen w-72 bg-[#070a12] border-r border-white/10 p-6
+          md:hidden fixed top-0 left-0 z-50 h-screen w-80 max-w-[85vw]
+          bg-[#0b0f1a]/92 backdrop-blur-xl border-r border-white/10
           transition-transform duration-200
           ${open ? 'translate-x-0' : '-translate-x-full'}
-          md:translate-x-0
         `}
       >
-        <div className="mb-6 text-xl font-semibold">Flow</div>
+        <div className="p-6 pb-4">
+          <div className="flex items-center justify-between">
+            <div className="select-none">
+              <div className="text-[13px] tracking-[0.22em] text-white/50 uppercase">Flow</div>
+              <div className="text-xl font-semibold">Menu</div>
+            </div>
 
-        <nav className="flex flex-col gap-2">
-          {NAV.map((item) => {
-            const active =
-              pathname === item.href || pathname.startsWith(item.href + '/')
+            <div className="h-10 w-10 rounded-full border border-white/10 bg-white/5 overflow-hidden flex items-center justify-center">
+              {user?.avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={user.avatarUrl}
+                  alt="Profile"
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <span className="text-xs font-semibold text-white/80">
+                  {getInitials(user?.name)}
+                </span>
+              )}
+            </div>
+          </div>
 
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => setOpen(false)}
-                className={`px-4 py-3 rounded-xl border text-sm transition
-                  ${
+          <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+            <div className="text-xs text-white/50">Signed in as</div>
+            <div className="mt-0.5 text-sm font-medium truncate">{user?.name ?? 'User'}</div>
+          </div>
+        </div>
+
+        <div className="px-4 pb-6">
+          <nav className="flex flex-col gap-1.5">
+            {NAV.map((item) => {
+              const active = pathname === item.href || pathname.startsWith(item.href + '/')
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setOpen(false)}
+                  className={[
+                    'group px-4 py-3 rounded-2xl border text-sm transition-all duration-200',
                     active
                       ? 'bg-white/10 border-white/20'
-                      : 'border-transparent hover:bg-white/5'
-                  }
-                `}
-              >
-                {item.label}
-              </Link>
-            )
-          })}
-        </nav>
+                      : 'border-transparent hover:bg-white/[0.06]',
+                  ].join(' ')}
+                >
+                  <span className="transition-all duration-200 group-hover:text-[15px] group-hover:tracking-wide">
+                    {item.label}
+                  </span>
+                </Link>
+              )
+            })}
+          </nav>
+        </div>
       </aside>
+    </>
+  )
+
+  return (
+    <>
+      {MobileDrawer}
+      {DesktopNav}
     </>
   )
 }
