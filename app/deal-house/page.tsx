@@ -363,7 +363,6 @@ export default function DealHousePage() {
 
   return (
     <div className="min-h-screen bg-[#0b0f1a] text-white">
-      <Sidebar />
 
       {toast && (
         <div className="fixed top-5 right-5 z-50">
