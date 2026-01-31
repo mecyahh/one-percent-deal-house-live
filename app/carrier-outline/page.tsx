@@ -310,7 +310,7 @@ export default function CarrierOutlinePage() {
         <div className="mb-8 flex items-end justify-between">
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">Carrier Outline</h1>
-            <p className="text-sm text-[var(--muted)] mt-1">Producer numbers + logins + quick links.</p>
+            <p className="text-sm text-[var(--muted)] mt-1">Keep Your Business In a Box</p>
           </div>
 
           <div className="flex items-center gap-3">
