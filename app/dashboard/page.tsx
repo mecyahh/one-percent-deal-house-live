@@ -54,6 +54,7 @@ export default function DashboardPage() {
   const [me, setMe] = useState<Profile | null>(null)
   const [deals, setDeals] = useState<DealRow[]>([])
   const [leaders, setLeaders] = useState<LeaderRow[]>([])
+  const [nameById, setNameById] = useState<Record<string, string>>({})
 
   // ✅ Goals (editable, persisted)
   const [goals, setGoals] = useState<UserGoals>({ weekly_goal_ap: 2500, monthly_goal_ap: 10000 })
@@ -363,6 +364,37 @@ async function buildAgencyLeaders(): Promise<LeaderRow[]> {
       }
     })
   }, [deals])
+  
+  useEffect(() => {
+  let alive = true
+
+  ;(async () => {
+    const ids = Array.from(new Set(parsed.map((d: any) => d.user_id).filter(Boolean))) as string[]
+    if (!ids.length) return
+
+    const { data: ps, error } = await supabase
+      .from('profiles')
+      .select('id,first_name,last_name,email')
+      .in('id', ids)
+
+    if (!alive) return
+    if (error || !ps) return
+
+    const map: Record<string, string> = {}
+    ;(ps as any[]).forEach((p) => {
+      const name =
+        [p.first_name, p.last_name].filter(Boolean).join(' ').trim() ||
+        (p.email ? String(p.email).split('@')[0] : '—')
+      map[String(p.id)] = name
+    })
+
+    setNameById(map)
+  })()
+
+  return () => {
+    alive = false
+  }
+}, [parsed])
 
   const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
   const startOfWeek = (d: Date) => {
@@ -769,9 +801,14 @@ const lineValues = useMemo(() => last7.map((x) => x.ap), [last7])
 
             <div className="rounded-2xl border border-white/10 overflow-hidden">
               <Row head left="Agent" mid="AP" right="By the hour" />
-              {(loading ? [] : parsed.slice(0, 6)).map((d) => (
-                <Row key={d.id} left={welcomeName} mid={`$${formatMoney(d.apNum)}`} right={timeAgo(d.dt)} />
-              ))}
+             {(loading ? [] : parsed.slice(0, 6)).map((d) => (
+      <Row
+    key={d.id}
+    left={d.user_id ? nameById[d.user_id] || '—' : '—'}
+    mid={`$${formatMoney(d.apNum)}`}
+    right={timeAgo(d.dt)}
+  />
+))}
               {!loading && parsed.length === 0 && <Row left="—" mid="No deals yet" right="—" />}
             </div>
           </section>
