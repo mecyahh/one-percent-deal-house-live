@@ -159,10 +159,6 @@ export default function Sidebar() {
 
       <div className="mt-auto p-6 pt-0">
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-          <div className="text-xs text-white/50">Tip</div>
-          <div className="mt-1 text-sm text-white/85">
-            Hover a tab to “pop” it — keeps the UI feeling alive.
-          </div>
         </div>
       </div>
     </aside>
