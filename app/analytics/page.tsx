@@ -7,8 +7,9 @@ import React, { useEffect, useMemo, useState } from 'react'
 import Sidebar from '../components/Sidebar'
 import FlowRangePicker from '@/app/components/FlowRangePicker'
 import dynamic from 'next/dynamic'
-const DealSourceDonut = dynamic(() => import('../components/DealSourceDonut'), { ssr: false })
 import { supabase } from '@/lib/supabaseClient'
+
+const DealSourceDonut = dynamic(() => import('../components/DealSourceDonut'), { ssr: false })
 
 type Profile = {
   id: string
@@ -255,53 +256,37 @@ export default function AnalyticsPage() {
   }, [agents])
 
   const parsed = useMemo((): ParsedDeal[] => {
-    return deals.map((d) => {
-      const dt = d.created_at ? new Date(d.created_at) : new Date()
+  return deals.map((d) => {
+    const dt = d.created_at ? new Date(d.created_at) : new Date()
 
-      const premiumNum =
-        typeof d.premium === 'number'
-          ? d.premium
-          : typeof d.premium === 'string'
-          ? Number(d.premium.replace(/[^0-9.]/g, ''))
-          : Number(d.premium || 0)
+    const premiumNum =
+      typeof d.premium === 'number'
+        ? d.premium
+        : typeof d.premium === 'string'
+        ? Number(d.premium.replace(/[^0-9.]/g, ''))
+        : Number(d.premium || 0)
 
-      const p = Number.isFinite(premiumNum) ? premiumNum : 0
-      const annual = p * 12
+    const p = Number.isFinite(premiumNum) ? premiumNum : 0
+    const annual = p * 12
 
-      const companySafe = (d.company || 'Other').trim() || 'Other'
+    const companySafe = (d.company || 'Other').trim() || 'Other'
 
-      const prof = d.agent_id ? agentsById.get(d.agent_id) : null
-      const agentSafe = prof ? displayName(prof) : d.agent_id ? 'Agent' : '—'
+    const prof = d.agent_id ? agentsById.get(d.agent_id) : null
+    const agentSafe = prof ? displayName(prof) : d.agent_id ? 'Agent' : '—'
 
-        const sourceDist = useMemo(() => {
-    const map = new Map<string, number>()
-    parsed.forEach((d) => {
-      const k = String((d as any).sourceSafe || 'Unknown').trim() || 'Unknown'
-      map.set(k, (map.get(k) || 0) + 1)
-    })
+    const sourceSafe = String((d as any).source || 'Unknown').trim() || 'Unknown'
 
-    const top = Array.from(map.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 6)
-
-    const labels = top.length ? top.map((e) => e[0]) : ['No Data']
-    const values = top.length ? top.map((e) => e[1]) : [100]
-    return { labels, values }
-  }, [parsed])
-
-      const sourceSafe = (String((d as any).source || 'Unknown').trim() || 'Unknown')
-
-      return {
-        ...d,
-        dt,
-        premiumNum: p,
-        annualNum: annual,
-        companySafe,
-        agentSafe,
-        sourceSafe,
-      }
-    })
-  }, [deals, agentsById])
+    return {
+      ...d,
+      dt,
+      premiumNum: p,
+      annualNum: annual,
+      companySafe,
+      agentSafe,
+      sourceSafe,
+    }
+  })
+}, [deals, agentsById])
 
   /* ---------------- KPIs ---------------- */
 
