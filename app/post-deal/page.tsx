@@ -456,9 +456,8 @@ export default function PostDealPage() {
                       className={inputCls}
                       value={policy_number}
                       onChange={(e) => setPolicyNumber(e.target.value)}
-                      placeholder="Policy number (min 6 chars)"
+                      placeholder="Policy number"
                     />
-                    <div className="mt-2 text-[11px] text-white/45">Must be 6+ characters to submit.</div>
                   </Field>
                 </div>
 
