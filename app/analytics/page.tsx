@@ -429,6 +429,23 @@ export default function AnalyticsPage() {
     return Array.from(m.values()).sort((a, b) => b.annual - a.annual)
   }, [parsed])
 
+  const sourceDist = useMemo(() => {
+    const map = new Map<string, number>()
+
+    parsed.forEach((d: any) => {
+      const k = String(d?.sourceSafe || d?.source || 'Unknown').trim() || 'Unknown'
+      map.set(k, (map.get(k) || 0) + 1)
+    })
+
+    const top = Array.from(map.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+
+    const labels = top.length ? top.map((e) => e[0]) : ['No Data']
+    const values = top.length ? top.map((e) => e[1]) : [100]
+    return { labels, values }
+  }, [parsed])
+  
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
 
