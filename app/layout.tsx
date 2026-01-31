@@ -1,7 +1,6 @@
-// ✅ REPLACE ENTIRE FILE: /app/layout.tsx
 import './globals.css'
-import Sidebar from './components/Sidebar'
 import type { Metadata, Viewport } from 'next'
+import AppShell from './components/AppShell'
 
 export const metadata: Metadata = {
   title: 'Flow',
@@ -22,8 +21,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className="min-h-screen bg-[#0b0f1a] text-white overflow-x-hidden">
-        <Sidebar />
-        <main className="min-h-screen w-full md:pl-72">{children}</main>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   )
